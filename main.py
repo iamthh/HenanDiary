@@ -1,15 +1,18 @@
 """应用入口。
 
-M0 骨架：初始化日志 → 建数据目录 → 加载配置 → 打印关键路径。
-采集（M1）、日报生成（M2）、托盘与查看窗口（M3）按 docs/开发状态.md 的顺序接入。
+M1：初始化日志 → 建数据目录 → 建库 → 启动采集调度 → 常驻（Ctrl+C 退出）。
+日报生成（M2）、托盘与查看窗口（M3）按 docs/开发状态.md 的顺序接入。
 """
 
 from __future__ import annotations
 
 import sys
+import time
 
 import config
+from collector.screenshot import ScreenshotCollector, start_scheduler
 from logger import get_logger, setup_logging
+from storage import db
 
 
 def main() -> int:
@@ -17,17 +20,25 @@ def main() -> int:
     log = get_logger(__name__)
 
     config.ensure_dirs()
+    db.init_db()
     settings = config.load_settings()
+    log.info("数据目录=%s，截图间隔=%s 分钟", config.get_data_dir(),
+             settings["capture"]["screenshot_interval_min"])
 
-    log.info("启动完成，数据目录=%s", config.get_data_dir())
-    log.info(
-        "当前配置：截图间隔=%s 分钟，工作时间=%s-%s，日报时间=%s",
-        settings["capture"]["screenshot_interval_min"],
-        settings["capture"]["work_hours"]["start"],
-        settings["capture"]["work_hours"]["end"],
-        settings["report"]["daily_time"],
-    )
-    log.info("M0 骨架就绪：截图采集、日报生成、托盘界面尚未实现")
+    try:
+        collector = ScreenshotCollector()
+    except RuntimeError as e:
+        log.error("AI 客户端初始化失败：%s（先运行 python tools/set_api_key.py 配 Key）", e)
+        return 1
+
+    scheduler = start_scheduler(collector)
+    log.info("M1 采集已启动，Ctrl+C 退出")
+    try:
+        while True:
+            time.sleep(1)
+    except KeyboardInterrupt:
+        scheduler.shutdown()
+        log.info("收到退出信号，调度器已停止")
     return 0
 
 
