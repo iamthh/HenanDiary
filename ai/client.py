@@ -63,6 +63,8 @@ class AIClient:
                     ],
                 }
             ],
-            max_tokens=100,
+            # 推理模型的思维链也算进预算，太小会只出 reasoning 不出 content
+            max_tokens=1024,
         )
-        return response.choices[0].message.content or ""
+        text = response.choices[0].message.content or ""
+        return text.strip()
