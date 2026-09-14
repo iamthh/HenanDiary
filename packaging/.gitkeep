@@ -1,0 +1,2 @@
+M7 在此放 app.spec（PyInstaller）与 installer.iss（Inno Setup）。
+构建前务必先确认工具的清理行为，并把 data.db / reports / logs 排除在输出之外。

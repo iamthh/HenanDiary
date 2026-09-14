@@ -1,0 +1,18 @@
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+
+# 打包产物（M7）
+build/
+dist/
+
+# 运行数据保护：真实数据只在 %APPDATA%\DailyLog\，任何构建/运行都不应在仓库内产生这些
+data.db
+reports/
+logs/
+exports/
+*.db-wal
+*.db-shm
