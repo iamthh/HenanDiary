@@ -1,7 +1,7 @@
 r"""统一日志入口。
 
 开发规范 1.3：所有模块必须通过本模块取 logger，禁止 print，禁止静默吞异常。
-日志落 %APPDATA%\DailyLog\logs\app.log，按 1MB 轮转、保留 5 份。
+日志落 %APPDATA%\HenanDiary\logs\app.log，按 1MB 轮转、保留 5 份。
 """
 
 from __future__ import annotations
