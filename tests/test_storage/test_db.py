@@ -76,9 +76,3 @@ def test_daily_report_schema_keeps_unique_date_and_status_columns() -> None:
 
 def test_weekly_report_schema_is_keyed_by_week_start() -> None:
     assert "week_start TEXT UNIQUE NOT NULL" in " ".join(db.SCHEMA_WEEKLY_REPORT.split())
-
-
-def test_interfaces_are_not_implemented_yet() -> None:
-    """M1 开始时这个测试会失败 —— 那是预期信号，届时把实现补上并删掉本测试。"""
-    with pytest.raises(NotImplementedError):
-        db.init_db()

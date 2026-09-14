@@ -23,7 +23,27 @@ A/B 双方基于此并行开发，任何变更必须先通知对方。
 
 from __future__ import annotations
 
+import sqlite3
+from pathlib import Path
 from typing import Any
+
+import config
+import logger as _logger
+
+log = _logger.get_logger(__name__)
+
+
+def _connect() -> sqlite3.Connection:
+    """按调用开一条独立连接（APScheduler 在后台线程调用，不做跨线程共享连接）。
+
+    ponytail: 每操作一连接；5 分钟一次的写入量，连接池没有意义。
+    """
+    path: Path = config.get_db_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(path)
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA journal_mode=WAL")
+    return conn
 
 # ---------------------------------------------------------------- 表结构（M0 冻结）
 
@@ -82,7 +102,14 @@ def init_db() -> None:
 
     依赖：无。负责方：M1。
     """
-    raise NotImplementedError("M0 仅冻结接口，实现在 M1（A 负责）")
+    conn = _connect()
+    try:
+        with conn:
+            for sql in ALL_SCHEMAS:
+                conn.execute(sql)
+    finally:
+        conn.close()
+    log.info("数据库就绪: %s", config.get_db_path())
 
 
 def save_screenshot_analysis(timestamp: str, analysis: str) -> int:
@@ -93,7 +120,18 @@ def save_screenshot_analysis(timestamp: str, analysis: str) -> int:
         analysis: AI 对该截图的文字描述（不含图片，图片绝不落盘）
     依赖：init_db 已调用。负责方：M1。
     """
-    raise NotImplementedError("M0 仅冻结接口，实现在 M1（A 负责）")
+    conn = _connect()
+    try:
+        with conn:
+            cur = conn.execute(
+                "INSERT INTO screenshot_analysis (timestamp, analysis) VALUES (?, ?)",
+                (timestamp, analysis),
+            )
+    finally:
+        conn.close()
+    new_id = cur.lastrowid
+    log.info("截图分析入库 id=%s timestamp=%s", new_id, timestamp)
+    return new_id
 
 
 def get_today_analyses(date: str) -> list[dict[str, Any]]:
@@ -105,7 +143,16 @@ def get_today_analyses(date: str) -> list[dict[str, Any]]:
         [{"id": int, "timestamp": str, "analysis": str}, ...]；无数据返回空列表。
     依赖：init_db 已调用。负责方：M1。
     """
-    raise NotImplementedError("M0 仅冻结接口，实现在 M1（A 负责）")
+    conn = _connect()
+    try:
+        rows = conn.execute(
+            "SELECT id, timestamp, analysis FROM screenshot_analysis"
+            " WHERE timestamp >= ? AND timestamp < ? ORDER BY timestamp",
+            (f"{date}T00:00:00", f"{date}T24:00:00"),
+        ).fetchall()
+    finally:
+        conn.close()
+    return [dict(row) for row in rows]
 
 
 def save_daily_report(
