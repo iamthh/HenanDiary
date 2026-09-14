@@ -10,7 +10,7 @@ import logging
 
 import pytest
 
-_LOG_ROOT = "dailylog"
+_LOG_ROOT = "henandiary"
 
 
 def _detach_handlers() -> None:
