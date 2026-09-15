@@ -44,6 +44,20 @@ class AIClient:
         )
         self._model = ai["model"]
 
+    def analyze_text(self, prompt: str) -> str:
+        """纯文本对话（日报生成用），返回完整输出。失败抛异常。
+
+        max_tokens=4096：推理模型的思维链同样计入输出预算，
+        M1 实测 100 会被 reasoning 吃光导致正文为空。
+        """
+        response = self._client.chat.completions.create(
+            model=self._model,
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=4096,
+        )
+        text = response.choices[0].message.content or ""
+        return text.strip()
+
     def analyze_image(self, base64_png: str) -> str:
         """送截图给 AI，返回一句话文字描述。失败抛异常。"""
         response = self._client.chat.completions.create(

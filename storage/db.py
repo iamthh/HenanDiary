@@ -24,6 +24,7 @@ A/B 双方基于此并行开发，任何变更必须先通知对方。
 from __future__ import annotations
 
 import sqlite3
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -171,7 +172,20 @@ def save_daily_report(
             00:30 重新生成传 True，供界面标注这份日报含补生成内容
     依赖：init_db 已调用。负责方：M2。
     """
-    raise NotImplementedError("M0 仅冻结接口，实现在 M2（B 负责）")
+    conn = _connect()
+    try:
+        with conn:
+            # 显式列 id 复用 UNIQUE date 冲突行的主键，让 REPLACE 原地更新而非删旧插新导致 id 跳号
+            conn.execute(
+                "INSERT OR REPLACE INTO daily_report"
+                " (id, date, content_md, content_json, generated_at, is_overwritten)"
+                " VALUES ((SELECT id FROM daily_report WHERE date = ?), ?, ?, ?, ?, ?)",
+                (date, date, content_md, content_json,
+                 datetime.now().isoformat(timespec="seconds"), int(is_overwritten)),
+            )
+    finally:
+        conn.close()
+    log.info("日报已保存 date=%s overwritten=%s", date, is_overwritten)
 
 
 def get_daily_report(date: str) -> dict[str, Any] | None:
@@ -181,7 +195,16 @@ def get_daily_report(date: str) -> dict[str, Any] | None:
               "is_overwritten","ai_status"}
     依赖：init_db 已调用。负责方：M2。
     """
-    raise NotImplementedError("M0 仅冻结接口，实现在 M2（B 负责）")
+    conn = _connect()
+    try:
+        row = conn.execute(
+            "SELECT date, content_md, content_json, generated_at, is_overwritten, ai_status"
+            " FROM daily_report WHERE date = ?",
+            (date,),
+        ).fetchone()
+    finally:
+        conn.close()
+    return dict(row) if row else None
 
 
 def list_daily_reports(limit: int = 60) -> list[dict[str, Any]]:
@@ -194,7 +217,16 @@ def list_daily_reports(limit: int = 60) -> list[dict[str, Any]]:
         [{"date","generated_at","is_overwritten","ai_status"}, ...]
     依赖：init_db 已调用。负责方：M2。
     """
-    raise NotImplementedError("M0 仅冻结接口，实现在 M2（B 负责）")
+    conn = _connect()
+    try:
+        rows = conn.execute(
+            "SELECT date, generated_at, is_overwritten, ai_status"
+            " FROM daily_report ORDER BY date DESC LIMIT ?",
+            (limit,),
+        ).fetchall()
+    finally:
+        conn.close()
+    return [dict(row) for row in rows]
 
 
 def save_weekly_report(week_start: str, content_md: str) -> None:
