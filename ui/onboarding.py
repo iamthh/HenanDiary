@@ -85,8 +85,14 @@ class _KeyPage(QWizardPage):
         log.info("首次引导完成，开始采集")
         return True
 
-    def nextId(self) -> None:  # Key 页即末页，引导两屏
-        return None
+    def nextId(self) -> int:
+        """Key 页就是最后一页，返回 -1 告诉 QWizard「没有下一页」。
+
+        必须是 -1：返回 None 不会报错，但向导会**既不前进也不结束**——按钮显示成 Next，
+        点下去毫无反应。2026-09-15 实际踩到：日志里 validatePage 连着成功 14 次、
+        settings 也落盘了，人却卡在向导里出不来。
+        """
+        return -1
 
 
 class OnboardingWizard(QWizard):
