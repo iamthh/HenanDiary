@@ -175,11 +175,12 @@ def save_daily_report(
     conn = _connect()
     try:
         with conn:
+            # 显式列 id 复用 UNIQUE date 冲突行的主键，让 REPLACE 原地更新而非删旧插新导致 id 跳号
             conn.execute(
                 "INSERT OR REPLACE INTO daily_report"
-                " (date, content_md, content_json, generated_at, is_overwritten)"
-                " VALUES (?, ?, ?, ?, ?)",
-                (date, content_md, content_json,
+                " (id, date, content_md, content_json, generated_at, is_overwritten)"
+                " VALUES ((SELECT id FROM daily_report WHERE date = ?), ?, ?, ?, ?, ?)",
+                (date, date, content_md, content_json,
                  datetime.now().isoformat(timespec="seconds"), int(is_overwritten)),
             )
     finally:

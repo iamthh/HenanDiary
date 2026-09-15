@@ -25,10 +25,13 @@ def test_get_daily_report_returns_none_when_absent() -> None:
 def test_save_daily_report_is_idempotent_by_date() -> None:
     db.init_db()
     db.save_daily_report("2026-09-15", "第一版", "{}")
+    first_id = db.get_daily_report("2026-09-15")["id"]
     db.save_daily_report("2026-09-15", "覆盖版", "{}", is_overwritten=True)
 
-    assert db.get_daily_report("2026-09-15")["content_md"] == "覆盖版"
-    assert db.get_daily_report("2026-09-15")["is_overwritten"] == 1
+    row = db.get_daily_report("2026-09-15")
+    assert row["content_md"] == "覆盖版"
+    assert row["is_overwritten"] == 1
+    assert row["id"] == first_id  # 覆盖复用同一行，id 不跳号
     assert len(db.list_daily_reports()) == 1  # 同一天只有一行
 
 
