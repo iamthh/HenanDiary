@@ -21,28 +21,25 @@ a = Analysis(
     [os.path.join(ROOT, "main.py")],
     pathex=[ROOT],
     binaries=[],
-    datas=[],  # 界面图标是代码画的圆点（ui/icons.py），没有资源文件要带
+    datas=[(os.path.join(ROOT, "web"), "web")],  # M8：Web 界面静态文件（index/css/js）
     hiddenimports=[
         "win32crypt",  # pywin32 的 DPAPI 入口，静态分析扫不到
         "apscheduler.schedulers.background",
         "apscheduler.triggers.cron",
         "apscheduler.triggers.interval",
+        # pywebview/pystray 按平台运行时动态 import，静态分析扫不到，必须显式列出
+        "webview.platforms.winforms",
+        "webview.platforms.edgechromium",
+        "clr",
+        "pystray._win32",
     ],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
     excludes=[
-        # 用不到的标准库与 Qt 模块，压体积（技术方案九：>80MB 时排除未用模块）
+        # 用不到的标准库，压体积（技术方案九：>80MB 时排除未用模块）
         "tkinter",
         "pydoc_data",
-        "PySide6.QtWebEngineCore",
-        "PySide6.QtWebEngineWidgets",
-        "PySide6.Qt3DCore",
-        "PySide6.QtCharts",
-        "PySide6.QtDataVisualization",
-        "PySide6.QtMultimedia",
-        "PySide6.QtQml",
-        "PySide6.QtQuick",
     ],
     noarchive=False,
     optimize=0,
