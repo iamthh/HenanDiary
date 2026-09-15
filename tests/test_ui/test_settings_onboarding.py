@@ -28,9 +28,13 @@ class _FakeCompletions:
     def __init__(self) -> None:
         self.calls: list[dict] = []
 
-    def create(self, **kwargs) -> SimpleNamespace:
+    def create(self, **kwargs):
+        """ai/client.py 统一走 stream=True，所以这里返回**分片序列**而不是整体响应。"""
         self.calls.append(kwargs)
-        return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content="OK"))])
+        chunk = SimpleNamespace(
+            choices=[SimpleNamespace(delta=SimpleNamespace(content="OK"))]
+        )
+        return iter([chunk])
 
 
 class _FakeOpenAI:
