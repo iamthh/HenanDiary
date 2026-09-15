@@ -2,7 +2,20 @@
 
 from __future__ import annotations
 
+import config
+import sqlite3
+
 from storage import db
+
+
+def _row_id(date: str) -> int:
+    conn = sqlite3.connect(config.get_db_path())
+    try:
+        return conn.execute(
+            "SELECT id FROM daily_report WHERE date = ?", (date,)
+        ).fetchone()[0]
+    finally:
+        conn.close()
 
 
 def test_save_and_get_daily_report() -> None:
@@ -25,13 +38,13 @@ def test_get_daily_report_returns_none_when_absent() -> None:
 def test_save_daily_report_is_idempotent_by_date() -> None:
     db.init_db()
     db.save_daily_report("2026-09-15", "第一版", "{}")
-    first_id = db.get_daily_report("2026-09-15")["id"]
+    first_id = _row_id("2026-09-15")
     db.save_daily_report("2026-09-15", "覆盖版", "{}", is_overwritten=True)
 
     row = db.get_daily_report("2026-09-15")
     assert row["content_md"] == "覆盖版"
     assert row["is_overwritten"] == 1
-    assert row["id"] == first_id  # 覆盖复用同一行，id 不跳号
+    assert _row_id("2026-09-15") == first_id  # 覆盖复用同一行，id 不跳号
     assert len(db.list_daily_reports()) == 1  # 同一天只有一行
 
 
