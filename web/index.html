@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>HenanDiary</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<div id="titlebar" class="pywebview-drag-region">
+  <div class="tb-title" id="tb-mode" style="display:none">HenanDiary</div>
+  <div class="tb-btns">
+    <button id="tb-min" title="最小化">&#8722;</button>
+    <button id="tb-max" title="最大化/还原">&#9633;</button>
+    <button id="tb-close" class="tb-x" title="关闭">&#10005;</button>
+  </div>
+</div>
+
+<div class="main-row">
+<aside id="sidebar" style="display:none">
+  <div class="logo"><span class="dot" id="state-dot"></span>HenanDiary</div>
+  <nav>
+    <button data-p="overview" class="active">☀ 今日总览</button>
+    <button data-p="timeline">⧗ 时间线</button>
+    <button data-p="report">✎ 日报 / 周报</button>
+    <button data-p="settings">⚙ 设置</button>
+  </nav>
+  <div class="side-bottom" id="side-status">…</div>
+</aside>
+
+<main id="main">
+
+<!-- 今日总览 -->
+<section class="page show" id="p-overview">
+  <h1>今日总览</h1>
+  <div class="sub" id="ov-date"></div>
+  <div class="grid">
+    <div class="card stat"><div class="num" id="ov-count">–</div><div class="lbl">今日采集条数</div></div>
+    <div class="card stat"><div class="num" id="ov-next" style="font-size:20px">–</div><div class="lbl">下次截图</div></div>
+    <div class="card stat"><div class="num" id="ov-time" style="font-size:20px">–</div><div class="lbl">日报生成时间</div></div>
+    <div class="card stat"><div class="num" id="ov-ai"><span class="badge ok">正常</span></div><div class="lbl">AI 调用状态</div></div>
+  </div>
+  <div class="card">
+    <b>今天的日报</b>&nbsp;<span id="ov-report-badge" class="badge wait">待生成</span>
+    <div class="row" style="margin-top:12px">
+      <button class="primary" id="btn-gen-daily">立即生成今日日报</button>
+      <button class="primary" id="btn-gen-weekly" style="background:var(--accent-dim)">立即生成本周周报</button>
+      <button class="ghost" id="btn-toggle-capture">暂停采集</button>
+    </div>
+  </div>
+  <div class="card" id="ov-pending" style="display:none">
+    <b style="color:var(--bad)">待重试任务</b>
+    <div id="ov-pending-list" style="font-size:13px;color:var(--dim);margin-top:8px"></div>
+  </div>
+</section>
+
+<!-- 时间线 -->
+<section class="page" id="p-timeline">
+  <h1>时间线</h1>
+  <div class="tl-head">
+    <div class="sub" style="margin:0">从最近一次往下展示 · 仅保留最近 3 天</div>
+    <select id="tl-date" style="margin-left:auto"></select>
+  </div>
+  <div class="timeline" id="tl-list"></div>
+  <p id="tl-empty" style="display:none;color:var(--dim);font-size:13px">这一天没有采集记录。</p>
+</section>
+
+<!-- 日报/周报 -->
+<section class="page" id="p-report">
+  <h1>日报 / 周报</h1>
+  <div class="sub">点击左侧日期查看</div>
+  <div class="report-layout">
+    <div class="date-list">
+      <div class="seg" style="margin:8px;width:calc(100% - 16px)">
+        <button id="kind-daily" class="on" style="flex:1">日报</button><button id="kind-weekly" style="flex:1">周报</button>
+      </div>
+      <div id="rp-list"></div>
+    </div>
+    <div class="card report-body" id="rp-body"><span style="color:var(--dim)">← 选一份报表看看</span></div>
+  </div>
+</section>
+
+<!-- 设置 -->
+<section class="page" id="p-settings">
+  <h1>设置</h1>
+  <div class="sub"></div>
+  <div class="card">
+    <b>AI 接口</b>
+    <div class="field" style="margin-top:14px"><label>Base URL</label><input type="text" id="st-url" style="width:420px"></div>
+    <div class="field"><label>模型名</label><input type="text" id="st-model" style="width:420px"></div>
+    <div class="field"><label>API Key<span id="st-haskey" style="color:var(--dim);font-weight:normal"></span></label>
+      <div class="row"><input type="password" id="st-key" placeholder="留空表示不修改" style="width:420px">
+      <button class="ghost" id="btn-test">测试连接</button><span id="st-test-msg" class="test-ok"></span></div></div>
+  </div>
+  <div class="card">
+    <b>采集</b>
+    <div class="field" style="margin-top:14px"><label>截图间隔</label>
+      <div class="seg" id="st-interval">
+        <button data-v="10">10 分钟</button><button data-v="5" class="on">5 分钟</button><button data-v="2">2 分钟</button>
+      </div></div>
+    <div class="field"><label>工作时间</label><div class="row">
+      <input type="text" id="st-ws" value="09:00" style="width:90px" placeholder="HH:MM">—
+      <input type="text" id="st-we" value="19:00" style="width:90px" placeholder="HH:MM"></div></div>
+  </div>
+  <div class="card">
+    <b>生成</b>
+    <div class="field" style="margin-top:14px"><div class="row">
+      <label style="margin:0">日报时间</label><input type="text" id="st-dt" value="22:00" style="width:90px" placeholder="HH:MM">
+      <label style="margin:0 0 0 24px">覆盖时间</label><input type="text" id="st-ot" value="00:30" style="width:90px" placeholder="HH:MM">
+    </div></div>
+  </div>
+  <div class="card danger-zone">
+    <h3>数据管理</h3>
+    <div class="row">
+      <button class="ghost" id="btn-export">导出全部数据（zip）</button>
+      <button class="ghost" id="btn-opendir">打开数据目录</button>
+      <button class="danger" id="btn-clear" style="margin-left:auto">清空全部数据…</button>
+    </div>
+    <p style="color:var(--dim);font-size:12px;margin-top:10px">导出内容：全部日报/周报 Markdown + settings.json（不含 Key）。原始素材仅保留 3 天。</p>
+  </div>
+  <div class="row"><button class="primary" id="btn-save" style="margin-left:auto">保存设置</button></div>
+</section>
+
+<!-- 首次引导 -->
+<section class="page" id="p-onboard">
+  <div class="wizard card" id="ob-step1">
+    <div class="steps"><i class="on"></i><i></i></div>
+    <h1>它是怎么工作的</h1>
+    <div class="sub">在开始前，请花一分钟了解（隐私透明告知）</div>
+    <ol>
+      <li>工作时间内，它每隔几分钟<b>给全屏拍一张照</b>，交给你配置的 AI 分析成一句话记录。</li>
+      <li>截图<b>只在内存中处理，绝不写盘</b>；留下来的只有 AI 产出的文字。</li>
+      <li>所有数据保存在你自己的电脑（%APPDATA%\HenanDiary），随时可查、可暂停、可一键清空。</li>
+      <li>截图内容会经过<b>你自己填写的 AI 接口</b>，应用无任何自有服务器。</li>
+      <li>每天定时汇总生成日报，周日生成周报。</li>
+    </ol>
+    <p style="color:var(--dim);font-size:12px;margin-top:10px">说明：因 Windows 虚拟内存机制，内存不足时内存页可能被换入 pagefile.sys，本应用无法杜绝。</p>
+    <div class="row" style="margin-top:22px;justify-content:space-between">
+      <label style="font-size:13px;color:var(--dim)"><input type="checkbox" id="ob-ack"> 我已知悉上述内容</label>
+      <button class="primary" id="ob-next" disabled>下一步：配置 API Key</button>
+    </div>
+  </div>
+  <div class="wizard card" id="ob-step2" style="display:none">
+    <div class="steps"><i class="on"></i><i class="on"></i></div>
+    <h2 style="color:var(--accent);margin-bottom:14px">连接你的 AI</h2>
+    <div class="field"><label>Base URL</label><input type="text" id="ob-url" placeholder="https://…" style="width:100%"></div>
+    <div class="field"><label>模型名</label><input type="text" id="ob-model" placeholder="如 sensenova-6.8-flash-lite" style="width:100%"></div>
+    <div class="field"><label>API Key</label><input type="password" id="ob-key" placeholder="sk-…" style="width:100%"></div>
+    <p id="ob-msg" style="font-size:13px;margin-bottom:10px"></p>
+    <div class="row"><button class="ghost" id="ob-back">上一步</button>
+      <button class="primary" id="ob-finish" style="margin-left:auto">测试连接并完成引导</button></div>
+  </div>
+</section>
+
+</main>
+</div>
+
+<!-- 关闭询问 -->
+<div class="modal-bg" id="m-close">
+  <div class="modal">
+    <h3>要退出 HenanDiary 吗？</h3>
+    <p>最小化到托盘后，它会继续后台采集并按点生成日报；退出进程则一切暂停，需要时重新打开应用。</p>
+    <div class="acts">
+      <button class="danger" id="close-quit">退出进程</button>
+      <button class="primary" id="close-tray">最小化到托盘（推荐）</button>
+    </div>
+  </div>
+</div>
+
+<!-- 清空确认 -->
+<div class="modal-bg" id="m-clear">
+  <div class="modal">
+    <h3 style="color:var(--bad)">清空全部数据？</h3>
+    <p>将永久删除所有日报、周报和采集记录，无法恢复。设置（接口地址与 Key）会保留。</p>
+    <div class="acts">
+      <button class="ghost" id="clear-cancel">取消</button>
+      <button class="danger" id="clear-ok">确认清空</button>
+    </div>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script src="app.js"></script>
+</body>
+</html>

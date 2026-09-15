@@ -1,6 +1,5 @@
-"""界面层（B 负责）。
+"""界面层。
 
-M3 实现托盘图标与日报查看窗口（QTextBrowser 渲染 Markdown）；
-M4 实现设置窗口与首次使用引导。
-M0 阶段本目录为空包，不引入 PySide6 依赖。
+M8 起为 Web 方案：ui/api.py 是 pywebview 的 js_api 桥，ui/single_instance.py 是单实例占位，
+界面本体在仓库根的 web/ 目录（HTML/CSS/JS）。PySide6 已随 M8 移除。
 """

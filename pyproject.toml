@@ -9,7 +9,8 @@ dependencies = [
     "openai>=1.51.0",
     "pywin32>=306",
     "apscheduler>=3.10.4",
-    "pyside6>=6.7.0",
+    "pywebview>=6.2.1",
+    "pystray>=0.19.5",
 ]
 
 [dependency-groups]
