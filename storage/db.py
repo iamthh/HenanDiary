@@ -1,6 +1,6 @@
 """SQLite 数据层。
 
-M0 只冻结接口与表结构，函数实现分别由 M1/M2/M5/M6 补齐（见 docs/开发状态.md）。
+接口与表结构在 M0 冻结，实现已按里程碑全部落地（M1/M2/M5/M6，见 docs/开发状态.md）。
 接口先行（开发规范 3.1）：本模块所有签名与数据表结构在 M0 冻结，
 A/B 双方基于此并行开发，任何变更必须先通知对方。
 
@@ -24,7 +24,7 @@ A/B 双方基于此并行开发，任何变更必须先通知对方。
 from __future__ import annotations
 
 import sqlite3
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -236,7 +236,20 @@ def save_weekly_report(week_start: str, content_md: str) -> None:
         week_start: 该周周一的日期 YYYY-MM-DD
     依赖：init_db 已调用。负责方：M6。
     """
-    raise NotImplementedError("M0 仅冻结接口，实现在 M6（B 负责）")
+    conn = _connect()
+    try:
+        with conn:
+            # 与日报同样显式列 id，让覆盖写原地更新而不跳号
+            conn.execute(
+                "INSERT OR REPLACE INTO weekly_report"
+                " (id, week_start, content_md, generated_at)"
+                " VALUES ((SELECT id FROM weekly_report WHERE week_start = ?), ?, ?, ?)",
+                (week_start, week_start, content_md,
+                 datetime.now().isoformat(timespec="seconds")),
+            )
+    finally:
+        conn.close()
+    log.info("周报已保存 week_start=%s", week_start)
 
 
 def get_weekly_report(week_start: str) -> dict[str, Any] | None:
@@ -245,7 +258,16 @@ def get_weekly_report(week_start: str) -> dict[str, Any] | None:
     返回结构：{"week_start","content_md","generated_at"}
     依赖：init_db 已调用。负责方：M6。
     """
-    raise NotImplementedError("M0 仅冻结接口，实现在 M6（B 负责）")
+    conn = _connect()
+    try:
+        row = conn.execute(
+            "SELECT week_start, content_md, generated_at FROM weekly_report"
+            " WHERE week_start = ?",
+            (week_start,),
+        ).fetchone()
+    finally:
+        conn.close()
+    return dict(row) if row else None
 
 
 def list_weekly_reports(limit: int = 52) -> list[dict[str, Any]]:
@@ -254,7 +276,16 @@ def list_weekly_reports(limit: int = 52) -> list[dict[str, Any]]:
     返回：[{"week_start","generated_at"}, ...]
     依赖：init_db 已调用。负责方：M6。
     """
-    raise NotImplementedError("M0 仅冻结接口，实现在 M6（B 负责）")
+    conn = _connect()
+    try:
+        rows = conn.execute(
+            "SELECT week_start, generated_at FROM weekly_report"
+            " ORDER BY week_start DESC LIMIT ?",
+            (limit,),
+        ).fetchall()
+    finally:
+        conn.close()
+    return [dict(row) for row in rows]
 
 
 def add_pending_report(date: str, type: str, reason: str) -> int:
@@ -267,7 +298,18 @@ def add_pending_report(date: str, type: str, reason: str) -> int:
         reason: 失败原因，用于区分 Key 无效 / 余额不足 / 网络不通（托盘变红提示）
     依赖：init_db 已调用。负责方：M5。
     """
-    raise NotImplementedError("M0 仅冻结接口，实现在 M5（B 负责）")
+    conn = _connect()
+    try:
+        with conn:
+            cur = conn.execute(
+                "INSERT INTO pending_report (date, type, reason, created_at) VALUES (?, ?, ?, ?)",
+                (date, type, reason, datetime.now().isoformat(timespec="seconds")),
+            )
+    finally:
+        conn.close()
+    new_id = cur.lastrowid
+    log.warning("登记待重试任务 id=%s date=%s type=%s reason=%s", new_id, date, type, reason)
+    return new_id
 
 
 def get_pending_reports() -> list[dict[str, Any]]:
@@ -278,7 +320,15 @@ def get_pending_reports() -> list[dict[str, Any]]:
         [{"id","date","type","reason","created_at"}, ...]
     依赖：init_db 已调用。负责方：M5。
     """
-    raise NotImplementedError("M0 仅冻结接口，实现在 M5（B 负责）")
+    conn = _connect()
+    try:
+        rows = conn.execute(
+            "SELECT id, date, type, reason, created_at FROM pending_report"
+            " ORDER BY created_at, id"
+        ).fetchall()
+    finally:
+        conn.close()
+    return [dict(row) for row in rows]
 
 
 def delete_pending_report(pending_id: int) -> None:
@@ -286,7 +336,14 @@ def delete_pending_report(pending_id: int) -> None:
 
     依赖：init_db 已调用。负责方：M5。
     """
-    raise NotImplementedError("M0 仅冻结接口，实现在 M5（B 负责）")
+    conn = _connect()
+    try:
+        with conn:
+            cur = conn.execute("DELETE FROM pending_report WHERE id = ?", (pending_id,))
+    finally:
+        conn.close()
+    # rowcount=0 表示这笔欠账已被别的路径销掉，按接口约定不属于错误，不抛异常
+    log.info("销账 pending id=%s 删除行数=%s", pending_id, cur.rowcount)
 
 
 def cleanup_old_data(days: int) -> None:
@@ -296,7 +353,19 @@ def cleanup_old_data(days: int) -> None:
         days: 保留天数，通常取 config 的 storage.raw_retention_days
     依赖：init_db 已调用。负责方：M6。
     """
-    raise NotImplementedError("M0 仅冻结接口，实现在 M6（B 负责）")
+    # 保留「含当天在内最近 days 个自然日」：days=3、9-15 跑，只删 9-13 零点之前的记录，
+    # 9-13/14/15 三天仍在库里，00:30 覆盖生成要用的前一天素材不会被误删
+    cutoff = (datetime.now().date() - timedelta(days=max(days - 1, 0))).isoformat()
+    conn = _connect()
+    try:
+        with conn:
+            cur = conn.execute(
+                "DELETE FROM screenshot_analysis WHERE timestamp < ?",
+                (f"{cutoff}T00:00:00",),
+            )
+    finally:
+        conn.close()
+    log.info("素材清理 days=%s cutoff=%s 删除行数=%s", days, cutoff, cur.rowcount)
 
 
 # ------------------------------------------------- 接口变更记录（M0 发现并补齐）
