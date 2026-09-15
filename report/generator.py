@@ -1,12 +1,14 @@
-"""日报生成器：读当日截图分析 → 构造 Prompt → 调 AI → 存库。
+"""日报/周报生成器：读素材 → 构造 Prompt → 调 AI → 存库。
 
 M2 验收目标：手动触发能生成一份带三个板块（今日概览/主要工作块/时间分布）的 Markdown 日报。
+M6 追加周报：汇总该周已生成的日报正文，周日 22:30 由调度层触发。
 失败态不在本模块处理：AI 调用失败直接抛异常，pending_report 欠账由 M5 调度层补。
 """
 
 from __future__ import annotations
 
 import json
+from datetime import date as _date, timedelta
 from typing import Any
 
 import config
@@ -65,11 +67,16 @@ def _split_md_and_json(text: str) -> tuple[str, str]:
         return content_md, "{}"
 
 
-def generate_daily_report(date: str, ai: AIClient | None = None) -> dict[str, Any]:
+def generate_daily_report(
+    date: str,
+    ai: AIClient | None = None,
+    is_overwritten: bool = False,
+) -> dict[str, Any]:
     """生成指定日期的日报并落库，返回 db.get_daily_report(date)。
 
     当日无素材时跳过生成、不落库，返回 {"skipped": True, "reason": ...}。
     幂等：同一天重复生成覆盖旧行（db 层按 date 唯一）。
+    is_overwritten: 次日 00:30 的覆盖版传 True，界面据此标注这份日报含补生成内容（需求 D7）。
     """
     analyses = db.get_today_analyses(date)
     if not analyses:
@@ -79,8 +86,80 @@ def generate_daily_report(date: str, ai: AIClient | None = None) -> dict[str, An
     client = ai or AIClient()
     output = client.analyze_text(_build_prompt(date, analyses))
     content_md, content_json = _split_md_and_json(output)
-    db.save_daily_report(date, content_md, content_json)
-    log.info("日报生成完成 date=%s 素材=%d条", date, len(analyses))
+    db.save_daily_report(date, content_md, content_json, is_overwritten=is_overwritten)
+    log.info("日报生成完成 date=%s 素材=%d条 覆盖版=%s", date, len(analyses), is_overwritten)
     result = db.get_daily_report(date)
+    assert result is not None  # 刚落库，必存在
+    return result
+
+
+# ------------------------------------------------------------------ 周报（M6）
+
+WEEKLY_PROMPT_TEMPLATE = """以下是用户 {start} ~ {end} 这一周已生成的 {count} 份日报正文。
+请据此生成一份中文周报，严格包含以下三个 Markdown 二级标题板块：
+
+## 本周概览
+两到三句话总结这一周主要做了什么、节奏如何。
+
+## 主要进展
+按项目/任务聚类，说明每项在本周推进到什么程度。
+
+## 时间分布
+估算各类活动（如编码、沟通、浏览、文档等）在本周的占比，合计约 100%。
+
+只输出 Markdown 正文，不要输出 JSON 代码块。
+
+日报正文：
+{reports}
+"""
+
+
+def _monday_of(day: _date) -> _date:
+    """取该日期所在周的周一，与 db.save_weekly_report 的 week_start 口径一致。"""
+    return day - timedelta(days=day.weekday())
+
+
+def _build_weekly_prompt(week_start: str, reports: list[tuple[str, str]]) -> str:
+    end = (_date.fromisoformat(week_start) + timedelta(days=6)).isoformat()
+    body = "\n\n".join(f"### {day}\n{md}" for day, md in reports)
+    return WEEKLY_PROMPT_TEMPLATE.format(
+        start=week_start, end=end, count=len(reports), reports=body
+    )
+
+
+def _strip_json_block(text: str) -> str:
+    """周报不需要结构化 JSON；模型若仍吐出 json 代码块，只保留前面的 Markdown 正文。"""
+    idx = text.find("```json")
+    return text[:idx].strip() if idx != -1 else text.strip()
+
+
+def generate_weekly_report(
+    week_start: str | None = None,
+    ai: AIClient | None = None,
+) -> dict[str, Any]:
+    """生成指定周的周报并落库，返回 db.get_weekly_report(week_start)。
+
+    week_start 缺省为本周周一。输入是该周周一到周日**已生成**的日报正文，
+    一份日报都没有时跳过、不落库，返回 {"skipped": True, "reason": ...}。
+    幂等：同一周重复生成覆盖旧行（db 层按 week_start 唯一）。
+    """
+    week_start = week_start or _monday_of(_date.today()).isoformat()
+    monday = _date.fromisoformat(week_start)
+    reports: list[tuple[str, str]] = []
+    for offset in range(7):
+        row = db.get_daily_report((monday + timedelta(days=offset)).isoformat())
+        if row:
+            reports.append((row["date"], row["content_md"]))
+    if not reports:
+        log.info("周 %s 没有已生成的日报，跳过周报生成", week_start)
+        return {"skipped": True, "reason": "本周没有已生成的日报"}
+
+    client = ai or AIClient()
+    content_md = _strip_json_block(client.analyze_text(_build_weekly_prompt(week_start, reports)))
+    if not content_md:
+        raise ValueError("AI 返回空周报正文")
+    db.save_weekly_report(week_start, content_md)
+    log.info("周报生成完成 week_start=%s 日报=%d份", week_start, len(reports))
+    result = db.get_weekly_report(week_start)
     assert result is not None  # 刚落库，必存在
     return result
