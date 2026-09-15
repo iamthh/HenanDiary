@@ -2,6 +2,7 @@
 
 M1 验收目标：程序常驻期间按配置间隔自动采集，工作时间外跳过。
 开发规范 1.3：单轮失败只记 error 不抛出，采集循环不能因一次 AI 调用失败而停摆。
+调度（采集间隔/日报/周报/清理）统一收在 scheduler/jobs.py，本模块只管采集一轮。
 """
 
 from __future__ import annotations
@@ -71,20 +72,3 @@ class ScreenshotCollector:
             self.run_once()
         except Exception:
             log.exception("本轮截图采集失败，等待下一轮重试")
-
-
-def start_scheduler(collector: ScreenshotCollector):
-    """按配置间隔起 APScheduler interval 任务，返回调度器（调用方负责 shutdown）。"""
-    from apscheduler.schedulers.background import BackgroundScheduler
-
-    interval_min = config.load_settings()["capture"]["screenshot_interval_min"]
-    scheduler = BackgroundScheduler()
-    scheduler.add_job(
-        collector.run_once_safe,
-        "interval",
-        minutes=interval_min,
-        misfire_grace_time=300,  # 睡屏/卡顿导致的错过 5 分钟内补跑
-    )
-    scheduler.start()
-    log.info("采集调度已启动，间隔 %s 分钟", interval_min)
-    return scheduler
