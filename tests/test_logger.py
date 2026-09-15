@@ -21,21 +21,21 @@ def test_log_record_lands_in_log_file() -> None:
 
 
 def test_logger_name_carries_unified_prefix() -> None:
-    assert get_logger("report.generator").name == "dailylog.report.generator"
+    assert get_logger("report.generator").name == "henandiary.report.generator"
 
 
 def test_setup_logging_does_not_duplicate_handlers() -> None:
     setup_logging(console=False)
     setup_logging(console=False)
 
-    names = [handler.get_name() for handler in logging.getLogger("dailylog").handlers]
-    assert names.count("dailylog-file") == 1
+    names = [handler.get_name() for handler in logging.getLogger("henandiary").handlers]
+    assert names.count("henandiary-file") == 1
 
 
 def test_rotating_file_handler_configured() -> None:
     setup_logging(console=False)
     handler = next(
-        h for h in logging.getLogger("dailylog").handlers if h.get_name() == "dailylog-file"
+        h for h in logging.getLogger("henandiary").handlers if h.get_name() == "henandiary-file"
     )
     assert handler.maxBytes > 0
     assert handler.backupCount > 0

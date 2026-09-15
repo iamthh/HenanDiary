@@ -13,16 +13,26 @@ import pytest
 
 from storage import db
 
-# 技术方案「接口约定」里冻结的签名，参数顺序也在契约内
+# 冻结的签名，参数名与顺序都在契约内。
+# 前 8 个来自技术方案「接口约定」，后 5 个是 M0 补齐的（见 storage/db.py 接口变更记录）。
 FROZEN_SIGNATURES: dict[str, list[str]] = {
+    # 截图素材
     "init_db": [],
     "save_screenshot_analysis": ["timestamp", "analysis"],
     "get_today_analyses": ["date"],
-    "save_daily_report": ["date", "content_md", "content_json"],
-    "get_daily_report": ["date"],
-    "save_weekly_report": ["week_start", "content_md"],
-    "get_pending_reports": [],
     "cleanup_old_data": ["days"],
+    # 日报
+    "save_daily_report": ["date", "content_md", "content_json", "is_overwritten"],
+    "get_daily_report": ["date"],
+    "list_daily_reports": ["limit"],
+    # 周报
+    "save_weekly_report": ["week_start", "content_md"],
+    "get_weekly_report": ["week_start"],
+    "list_weekly_reports": ["limit"],
+    # 失败重试
+    "add_pending_report": ["date", "type", "reason"],
+    "get_pending_reports": [],
+    "delete_pending_report": ["pending_id"],
 }
 
 
@@ -31,6 +41,16 @@ def test_signature_is_frozen(name: str, params: list[str]) -> None:
     assert hasattr(db, name), f"接口缺失: {name}"
     actual = list(inspect.signature(getattr(db, name)).parameters)
     assert actual == params, f"{name} 形参已变更: {actual} != {params}"
+
+
+def test_public_interface_set_is_frozen() -> None:
+    """多一个或少一个公开函数都要显式改契约表，避免接口被悄悄改。"""
+    public = sorted(
+        name
+        for name, value in vars(db).items()
+        if not name.startswith("_") and inspect.isfunction(value)
+    )
+    assert public == sorted(FROZEN_SIGNATURES)
 
 
 @pytest.mark.parametrize("name", sorted(FROZEN_SIGNATURES))
@@ -56,9 +76,3 @@ def test_daily_report_schema_keeps_unique_date_and_status_columns() -> None:
 
 def test_weekly_report_schema_is_keyed_by_week_start() -> None:
     assert "week_start TEXT UNIQUE NOT NULL" in " ".join(db.SCHEMA_WEEKLY_REPORT.split())
-
-
-def test_interfaces_are_not_implemented_yet() -> None:
-    """M1 开始时这个测试会失败 —— 那是预期信号，届时把实现补上并删掉本测试。"""
-    with pytest.raises(NotImplementedError):
-        db.init_db()

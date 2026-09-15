@@ -1,4 +1,4 @@
-# DailyLog
+# HenanDiary
 
 纯截图驱动的 Windows 桌面小工具：每隔几分钟截一张全屏图 → 送 AI 分析 → 每晚生成一份日报。数据只存本地，截图绝不落盘。
 
@@ -38,7 +38,7 @@ tests/                  pytest
 
 ## 数据位置
 
-固定 `%APPDATA%\DailyLog\`，与安装路径完全分离：
+固定 `%APPDATA%\HenanDiary\`，与安装路径完全分离：
 
 ```
 data.db                  SQLite 主库

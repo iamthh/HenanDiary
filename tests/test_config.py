@@ -14,7 +14,7 @@ import config
 
 
 def test_data_dir_sits_under_appdata(tmp_path: Path) -> None:
-    assert config.get_data_dir() == tmp_path / "DailyLog"
+    assert config.get_data_dir() == tmp_path / "HenanDiary"
 
 
 def test_data_dir_is_outside_repo() -> None:

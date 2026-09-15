@@ -1,5 +1,5 @@
 [project]
-name = "daily-log"
+name = "henandiary"
 version = "0.1.0"
 description = "桌面日报生成应用：定时截图 → AI 分析 → 每晚自动生成日报"
 requires-python = ">=3.11"

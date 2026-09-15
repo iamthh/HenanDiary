@@ -9,7 +9,10 @@ venv/
 build/
 dist/
 
-# 运行数据保护：真实数据只在 %APPDATA%\DailyLog\，任何构建/运行都不应在仓库内产生这些
+# 本地工具状态（含 agent 工作记忆），不进版本库
+.workbuddy/
+
+# 运行数据保护：真实数据只在 %APPDATA%\HenanDiary\，任何构建/运行都不应在仓库内产生这些
 data.db
 reports/
 logs/

@@ -2,7 +2,7 @@ r"""配置读写与数据目录解析。
 
 数据路径与安装路径完全分离（需求文档 D12）：
 - 安装路径：默认 C:\Program Files\，由安装包决定，用户可改
-- 数据路径：固定 %APPDATA%\DailyLog\
+- 数据路径：固定 %APPDATA%\HenanDiary\
 
 开发规范 1.4：任何模块需要配置都从本模块读，禁止自己存配置、禁止写死路径/Key/URL。
 """
@@ -14,7 +14,7 @@ import os
 from pathlib import Path
 from typing import Any
 
-APP_NAME = "DailyLog"
+APP_NAME = "HenanDiary"
 
 # 需求文档 D9：截图间隔只能三选一，默认 5 分钟
 ALLOWED_INTERVAL_MIN = (2, 5, 10)
@@ -43,7 +43,7 @@ DEFAULT_SETTINGS: dict[str, Any] = {
 
 
 def get_data_dir() -> Path:
-    r"""数据根目录 %APPDATA%\DailyLog\（只解析路径，不创建）。"""
+    r"""数据根目录 %APPDATA%\HenanDiary\（只解析路径，不创建）。"""
     appdata = os.environ.get("APPDATA")
     if not appdata:
         raise RuntimeError("环境变量 APPDATA 缺失，无法定位数据目录")
