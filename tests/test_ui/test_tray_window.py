@@ -68,3 +68,47 @@ def test_tray_toggle_capture_writes_settings(qapp) -> None:
 
 def test_circle_icon_not_null(qapp) -> None:
     assert not circle_icon("#2ecc40").isNull()
+
+
+def test_tray_menu_has_weekly_generate(qapp) -> None:
+    window = ReportWindow()
+    tray = TrayIcon(window, on_open_settings=lambda: None)
+    labels = [a.text() for a in tray.contextMenu().actions() if a.text()]
+    assert "立即生成本周周报" in labels
+
+
+def test_tray_ai_failure_switches_icon(qapp) -> None:
+    """需求 D14：AI 失败时托盘转红。"""
+    window = ReportWindow()
+    tray = TrayIcon(window, on_open_settings=lambda: None)
+    before = tray.icon().pixmap(16, 16).toImage()
+
+    tray.on_ai_failure("ConnectionError: 断网")
+
+    assert tray.icon().pixmap(16, 16).toImage() != before
+
+
+@pytest.fixture()
+def seed_weeklies() -> None:
+    db.init_db()
+    db.save_weekly_report("2026-09-14", "## 本周概览\n推进 M5")
+
+
+def test_report_window_switches_to_weekly(qapp, seed_weeklies) -> None:
+    window = ReportWindow()
+    window.refresh()
+    assert window.current_kind() == "daily"
+    assert "还没有日报" in window._view.toPlainText()  # 该类别下确实没有日报
+
+    window._kind.setCurrentIndex(1)
+
+    assert window.current_kind() == "weekly"
+    assert window._list.item(0).text() == "2026-09-14"
+    assert "本周概览" in window._view.toPlainText()
+
+
+def test_report_window_empty_weekly(qapp) -> None:
+    db.init_db()
+    window = ReportWindow()
+    window._kind.setCurrentIndex(1)
+    assert "还没有周报" in window._view.toPlainText()

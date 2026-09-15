@@ -29,12 +29,14 @@ class _FakeScheduler:
 def wired_main(monkeypatch):
     """假采集器/调度器 + 引导已完成 + exec 立即 quit。"""
     import collector.screenshot as cs
+    import scheduler.jobs as jobs
     from PySide6.QtCore import QTimer
     from PySide6.QtWidgets import QApplication
 
     fake = _FakeScheduler()
     monkeypatch.setattr(cs, "ScreenshotCollector", lambda: object())
-    monkeypatch.setattr(cs, "start_scheduler", lambda collector: fake)
+    # M5 起调度统一收在 scheduler/jobs.build_scheduler，采集器不再自带 start_scheduler
+    monkeypatch.setattr(jobs, "build_scheduler", lambda collector, on_ai_failure=None: fake)
     config.load_settings()  # 先生成 settings.json 再翻引导标记
     config.update_settings({"onboarding": {"done": True}})
     app = QApplication.instance() or QApplication([])
