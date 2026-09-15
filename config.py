@@ -39,6 +39,9 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "storage": {
         "raw_retention_days": 3,
     },
+    "onboarding": {
+        "done": False,
+    },
 }
 
 

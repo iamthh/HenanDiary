@@ -1,12 +1,15 @@
-"""骨架验收：包结构完整、模块可导入、入口可跑通。
+"""骨架验收：包结构完整、模块可导入、入口分发与接线顺序。
 
-M1 后 main() 常驻运行，测试用替身把采集器/调度器/睡眠换掉，
-验证的是接线顺序（建库→起调度→响应退出），不是真实截图。
+M3 后常驻入口改为 GUI（托盘+事件循环），offscreen 下用 QTimer 退出 exec，
+验证的是接线顺序（建库→引导门控→起调度→退出时停调度），不是真实截图。
 """
 
 from __future__ import annotations
 
 import importlib
+import os
+
+os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import pytest
 
@@ -18,17 +21,24 @@ class _FakeScheduler:
     def __init__(self) -> None:
         self.shutdown_called = False
 
-    def shutdown(self) -> None:
+    def shutdown(self, wait: bool = True) -> None:
         self.shutdown_called = True
 
 
 @pytest.fixture
 def wired_main(monkeypatch):
-    """给 main 装替身：假采集器 + 假调度器 + 第一次 sleep 就 Ctrl+C。"""
+    """假采集器/调度器 + 引导已完成 + exec 立即 quit。"""
+    import collector.screenshot as cs
+    from PySide6.QtCore import QTimer
+    from PySide6.QtWidgets import QApplication
+
     fake = _FakeScheduler()
-    monkeypatch.setattr(main, "ScreenshotCollector", lambda: object())
-    monkeypatch.setattr(main, "start_scheduler", lambda collector: fake)
-    monkeypatch.setattr(main.time, "sleep", lambda s: (_ for _ in ()).throw(KeyboardInterrupt))
+    monkeypatch.setattr(cs, "ScreenshotCollector", lambda: object())
+    monkeypatch.setattr(cs, "start_scheduler", lambda collector: fake)
+    config.load_settings()  # 先生成 settings.json 再翻引导标记
+    config.update_settings({"onboarding": {"done": True}})
+    app = QApplication.instance() or QApplication([])
+    QTimer.singleShot(0, app.quit)
     return fake
 
 
@@ -55,3 +65,13 @@ def test_entry_point_prepares_data_dirs(wired_main) -> None:
     main.main()
     assert config.get_config_path().is_file()
     assert config.get_db_path().parent.is_dir()
+
+
+def test_cli_dispatch(monkeypatch) -> None:
+    calls: list[tuple] = []
+    monkeypatch.setattr(main, "_gen_report", lambda argv: calls.append(("gen", argv)) or 0)
+    monkeypatch.setattr(main, "_run_ui", lambda open_settings_only: calls.append(("ui", open_settings_only)) or 0)
+    assert main.main(["--gen-report", "2026-09-14"]) == 0
+    assert main.main(["--settings"]) == 0
+    assert main.main([]) == 0
+    assert calls == [("gen", ["2026-09-14"]), ("ui", True), ("ui", False)]
