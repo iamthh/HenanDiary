@@ -30,6 +30,7 @@ def wired_main(monkeypatch):
     """假采集器/调度器 + 引导已完成 + exec 立即 quit。"""
     import collector.screenshot as cs
     import scheduler.jobs as jobs
+    import ui.single_instance as si
     from PySide6.QtCore import QTimer
     from PySide6.QtWidgets import QApplication
 
@@ -37,6 +38,9 @@ def wired_main(monkeypatch):
     monkeypatch.setattr(cs, "ScreenshotCollector", lambda: object())
     # M5 起调度统一收在 scheduler/jobs.build_scheduler，采集器不再自带 start_scheduler
     monkeypatch.setattr(jobs, "build_scheduler", lambda collector, on_ai_failure=None: fake)
+    # 同一个 pytest 进程里会多次调 main()，单实例监听必须绕开，
+    # 否则第二个用例会被判成"已有实例在运行"而直接退出
+    monkeypatch.setattr(si, "acquire", lambda on_second_launch=None: object())
     config.load_settings()  # 先生成 settings.json 再翻引导标记
     config.update_settings({"onboarding": {"done": True}})
     app = QApplication.instance() or QApplication([])

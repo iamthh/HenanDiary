@@ -81,6 +81,7 @@ def _run_ui(open_settings_only: bool) -> int:
 
     from ui.main_window import ReportWindow
     from ui.settings import SettingsDialog
+    from ui.single_instance import acquire as _acquire_single_instance
     from ui.tray import TrayIcon
 
     log = get_logger(__name__)
@@ -109,6 +110,13 @@ def _run_ui(open_settings_only: bool) -> int:
     tray = TrayIcon(window, on_open_settings=open_settings)
     bridge = _build_failure_bridge()
     bridge.failed.connect(tray.on_ai_failure)
+
+    # 需求 F6：单实例。已有实例在跑就让它把窗口显示出来，本次不再起第二个托盘。
+    # 返回值需一直持有（见 ui.single_instance.acquire 的说明），否则监听会随对象回收断掉。
+    instance_server = _acquire_single_instance(tray.show_window)
+    if instance_server is None:
+        log.info("已有实例在运行，本次启动直接退出")
+        return 0
 
     ready = config.load_settings()["onboarding"]["done"]
     if ready:
