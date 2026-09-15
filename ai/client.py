@@ -35,7 +35,7 @@ class AIClient:
         settings = config.load_settings()
         ai = settings["ai"]
         if not ai["api_key_encrypted"]:
-            raise RuntimeError("未配置 API Key，请先运行 python tools/set_api_key.py")
+            raise RuntimeError("未配置 API Key，请完成首次引导或在设置窗口填写")
         from openai import OpenAI  # 延迟导入，没装 openai 时加密脚本仍可运行
 
         self._client = OpenAI(
@@ -43,6 +43,15 @@ class AIClient:
             base_url=ai["base_url"],
         )
         self._model = ai["model"]
+
+    def test_connection(self) -> str:
+        """发一条最短对话验证 Key/BaseURL/模型可用，返回 'OK'。失败抛异常。"""
+        response = self._client.chat.completions.create(
+            model=self._model,
+            messages=[{"role": "user", "content": "回复 OK 两个字母即可"}],
+            max_tokens=1024,
+        )
+        return (response.choices[0].message.content or "").strip()
 
     def analyze_text(self, prompt: str) -> str:
         """纯文本对话（日报生成用），返回完整输出。失败抛异常。
