@@ -23,6 +23,7 @@
     <button data-p="overview" class="active">☀ 今日总览</button>
     <button data-p="timeline">⧗ 时间线</button>
     <button data-p="report">✎ 日报 / 周报</button>
+    <button data-p="usage">◔ 应用统计</button>
     <button data-p="settings">⚙ 设置</button>
   </nav>
   <div class="side-bottom" id="side-status">…</div>
@@ -80,6 +81,26 @@
   </div>
 </section>
 
+<!-- 应用统计 -->
+<section class="page" id="p-usage">
+  <h1>应用统计</h1>
+  <div class="sub" id="us-sub"></div>
+  <div class="usage-head">
+    <label style="color:var(--dim);font-size:13px">日期</label>
+    <input type="date" id="us-date" style="width:150px">
+    <span style="color:var(--dim);font-size:13px;margin-left:10px">视图</span>
+    <div class="seg" id="us-mode">
+      <button data-v="bar" class="on">条形图</button><button data-v="pie">饼图</button>
+    </div>
+  </div>
+  <div class="card" id="us-card">
+    <div class="grid" id="us-stats"></div>
+    <div id="us-chart" style="margin-top:20px"></div>
+    <div class="usage-note" id="us-note"></div>
+  </div>
+  <p id="us-empty" style="display:none;color:var(--dim);font-size:13px">这一天没有应用使用记录。</p>
+</section>
+
 <!-- 设置 -->
 <section class="page" id="p-settings">
   <h1>设置</h1>
@@ -133,6 +154,7 @@
       <li>所有数据保存在你自己的电脑（%APPDATA%\HenanDiary），随时可查、可暂停、可一键清空。</li>
       <li>截图内容会经过<b>你自己填写的 AI 接口</b>，应用无任何自有服务器。</li>
       <li>每天定时汇总生成日报，周日生成周报。</li>
+      <li>另读取当前前台程序的<b>进程名</b>（如 Code、chrome）用于统计应用时长；<b>不读窗口标题、不读网址</b>。</li>
     </ol>
     <p style="color:var(--dim);font-size:12px;margin-top:10px">说明：因 Windows 虚拟内存机制，内存不足时内存页可能被换入 pagefile.sys，本应用无法杜绝。</p>
     <div class="row" style="margin-top:22px;justify-content:space-between">

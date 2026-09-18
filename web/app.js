@@ -78,6 +78,7 @@ function go(page) {
   if (page === 'overview') loadOverview();
   if (page === 'timeline') loadTimelineDates();
   if (page === 'report') loadReports();
+  if (page === 'usage') loadUsage();
   if (page === 'settings') loadSettingsForm();
 }
 document.querySelectorAll('nav button').forEach(b => b.addEventListener('click', () => go(b.dataset.p)));
@@ -218,6 +219,117 @@ async function showReport(key) {
        <button class="ghost" id="btn-regen">重新生成</button></div>`
     + renderMarkdown(r.content_md);
   $('btn-regen').addEventListener('click', () => generate(_kind, _kind === 'daily' ? '今日日报' : '本周周报'));
+}
+
+/* ---------------------------------------------------------------- 应用统计（M9） */
+
+/* 图表全部手写：项目约束是零构建、零前端框架，不引 ECharts/Chart.js。
+   条形图用 div 宽度百分比，饼图用内联 SVG 扇形路径，都不需要额外依赖。 */
+
+const PIE_COLORS = ['#d97a4a', '#e8a97e', '#8a4d30', '#6fbf73', '#d9c48a', '#6b5f52'];
+
+let _usageMode = 'bar';
+let _usage = null;
+
+$('us-mode').querySelectorAll('button').forEach(b => b.addEventListener('click', () => {
+  _usageMode = b.dataset.v;
+  $('us-mode').querySelectorAll('button').forEach(x => x.classList.toggle('on', x === b));
+  renderUsageChart();
+}));
+
+$('us-date').addEventListener('change', () => loadUsage($('us-date').value));
+
+function fmtDur(min) {
+  const h = Math.floor(min / 60), m = min % 60;
+  return h ? `${h}h${String(m).padStart(2, '0')}m` : `${m}m`;
+}
+
+/* 超出 n 项就合并成「其他」——饼图扇区太多就没法读了 */
+function topN(items, n) {
+  if (items.length <= n) return items.slice();
+  const rest = items.slice(n);
+  return items.slice(0, n).concat([{
+    app: '其他',
+    minutes: rest.reduce((s, i) => s + i.minutes, 0),
+    percent: Math.round(rest.reduce((s, i) => s + i.percent, 0) * 10) / 10,
+  }]);
+}
+
+async function loadUsage(date) {
+  const day = date || $('us-date').value || new Date().toLocaleDateString('sv-SE');
+  $('us-date').value = day;
+  const r = await call('get_app_usage', day);
+  if (!r || r.error) return;
+  _usage = r;
+
+  const has = r.items.length > 0;
+  $('us-card').style.display = has ? 'block' : 'none';
+  $('us-empty').style.display = has ? 'none' : 'block';
+  $('us-sub').textContent = `${day} · 共 ${fmtDur(r.total_min)} · ${r.samples} 次采样`;
+  if (!has) return;
+
+  $('us-stats').innerHTML =
+    `<div class="card stat" style="margin:0"><div class="num">${r.items.length}</div>`
+    + `<div class="lbl">应用数</div></div>`
+    + `<div class="card stat" style="margin:0"><div class="num">${fmtDur(r.total_min)}</div>`
+    + `<div class="lbl">活跃时长</div></div>`
+    + `<div class="card stat" style="margin:0"><div class="num" style="font-size:20px">${esc(r.items[0].app)}</div>`
+    + `<div class="lbl">用得最多</div></div>`;
+  renderUsageChart();
+}
+
+function renderUsageChart() {
+  if (!_usage) return;
+  $('us-chart').innerHTML = _usageMode === 'pie'
+    ? pieHtml(topN(_usage.items, 5))
+    : barHtml(topN(_usage.items, 8));
+  $('us-note').textContent =
+    '按采集间隔采样估算：两次采样之间的应用切换无法捕捉，挂机时间不计入。'
+    + '数值是近似估算，不是精确计时。';
+}
+
+function barHtml(items) {
+  const max = Math.max(...items.map(i => i.minutes), 1);
+  return items.map(i => {
+    const other = i.app === '其他' ? ' other' : '';
+    return `<div class="bar-row">
+      <div class="bar-name" title="${esc(i.app)}">${esc(i.app)}</div>
+      <div class="bar-track"><span class="bar-fill${other}" style="width:${(i.minutes / max * 100).toFixed(1)}%"></span></div>
+      <div class="bar-value">${fmtDur(i.minutes)} · ${i.percent}%</div>
+    </div>`;
+  }).join('');
+}
+
+function pieHtml(items) {
+  const total = items.reduce((s, i) => s + i.minutes, 0) || 1;
+  const CX = 75, CY = 75, R = 64;
+  let angle = -Math.PI / 2;   // 从 12 点方向开始顺时针
+  let paths = '';
+  items.forEach((i, idx) => {
+    const from = angle;
+    const to = angle + i.minutes / total * Math.PI * 2;
+    angle = to;
+    const color = PIE_COLORS[idx % PIE_COLORS.length];
+    if (items.length === 1) {   // 整圆时起止点重合，弧线会退化，直接画圆
+      paths += `<circle cx="${CX}" cy="${CY}" r="${R}" fill="${color}"/>`;
+      return;
+    }
+    const x1 = CX + R * Math.cos(from), y1 = CY + R * Math.sin(from);
+    const x2 = CX + R * Math.cos(to), y2 = CY + R * Math.sin(to);
+    const large = (to - from) > Math.PI ? 1 : 0;
+    paths += `<path d="M${CX},${CY} L${x1.toFixed(2)},${y1.toFixed(2)}`
+      + ` A${R},${R} 0 ${large} 1 ${x2.toFixed(2)},${y2.toFixed(2)} Z"`
+      + ` fill="${color}" stroke="var(--bg)" stroke-width="0.5"/>`;
+  });
+  const legend = items.map((i, idx) =>
+    `<div class="legend-row">
+       <span class="swatch" style="background:${PIE_COLORS[idx % PIE_COLORS.length]}"></span>
+       <span class="nm">${esc(i.app)}</span><span class="pct">${i.percent}%</span>
+     </div>`).join('');
+  return `<div class="pie-wrap">
+    <svg viewBox="0 0 150 150" width="150" height="150" role="img" aria-label="应用使用占比饼图">${paths}</svg>
+    <div class="legend">${legend}</div>
+  </div>`;
 }
 
 /* ---------------------------------------------------------------- 设置 */

@@ -218,8 +218,50 @@ def test_catch_up_skips_when_no_materials(monkeypatch) -> None:
 
 
 def test_run_cleanup_swallows_failure(monkeypatch) -> None:
+    db.init_db()
     monkeypatch.setattr(jobs, "cleanup_expired", _boom)
     assert jobs.run_cleanup() == 0  # 清理失败只记日志，不影响其他任务
+
+
+def test_run_cleanup_also_clears_app_usage(monkeypatch) -> None:
+    """M9：素材 3 天、应用明细 90 天，两个保留期在每日清理里都要跑到。"""
+    db.init_db()
+    db.save_app_usage("2020-01-01T10:00:00", "Code", 300)
+    monkeypatch.setattr(jobs, "cleanup_expired", lambda: 0)
+
+    jobs.run_cleanup()
+
+    assert db.get_app_usage_summary("2020-01-01") == []
+
+
+# ---------------------------------------------------------------- 应用采样门控
+
+
+class _UsageCollector:
+    def __init__(self, calls: list[str]) -> None:
+        self._calls = calls
+
+    def run_once_safe(self) -> None:
+        self._calls.append("sampled")
+
+
+def test_run_app_usage_skips_outside_work_hours() -> None:
+    """需求 F1.3：与截图采集同一工作时间窗口，窗口外不采样。"""
+    config.update_settings({"capture": {"work_hours": {"start": "00:00", "end": "00:01"}}})
+    calls: list[str] = []
+
+    jobs.run_app_usage(_UsageCollector(calls))
+
+    assert calls == []
+
+
+def test_run_app_usage_delegates_inside_work_hours() -> None:
+    config.update_settings({"capture": {"work_hours": {"start": "00:00", "end": "23:59"}}})
+    calls: list[str] = []
+
+    jobs.run_app_usage(_UsageCollector(calls))
+
+    assert calls == ["sampled"]
 
 
 # ---------------------------------------------------------------- 调度装配
@@ -240,7 +282,8 @@ def test_build_scheduler_registers_all_jobs(monkeypatch) -> None:
     scheduler = _build(monkeypatch)
     try:
         assert {job.id for job in scheduler.get_jobs()} == {
-            "capture", "daily_report", "daily_overwrite", "weekly_report", "cleanup",
+            "capture", "app_usage", "daily_report", "daily_overwrite",
+            "weekly_report", "cleanup",
         }
     finally:
         scheduler.shutdown(wait=False)

@@ -14,7 +14,8 @@ import pytest
 from storage import db
 
 # 冻结的签名，参数名与顺序都在契约内。
-# 前 8 个来自技术方案「接口约定」，后 5 个是 M0 补齐的（见 storage/db.py 接口变更记录）。
+# 前 8 个来自技术方案「接口约定」，中间 5 个是 M0 补齐的，
+# 末 3 个是 M9（应用使用统计）补齐的——两批都见 storage/db.py 的接口变更记录。
 FROZEN_SIGNATURES: dict[str, list[str]] = {
     # 截图素材
     "init_db": [],
@@ -33,6 +34,10 @@ FROZEN_SIGNATURES: dict[str, list[str]] = {
     "add_pending_report": ["date", "type", "reason"],
     "get_pending_reports": [],
     "delete_pending_report": ["pending_id"],
+    # 应用使用（M9）
+    "save_app_usage": ["timestamp", "app", "duration_s"],
+    "get_app_usage_summary": ["date"],
+    "cleanup_old_app_usage": ["days"],
 }
 
 
@@ -60,7 +65,7 @@ def test_interface_is_documented(name: str) -> None:
 
 @pytest.mark.parametrize(
     "table",
-    ["screenshot_analysis", "daily_report", "weekly_report", "pending_report"],
+    ["screenshot_analysis", "daily_report", "weekly_report", "pending_report", "app_usage"],
 )
 def test_schema_declares_table(table: str) -> None:
     joined = " ".join(" ".join(sql.split()) for sql in db.ALL_SCHEMAS)

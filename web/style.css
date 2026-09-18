@@ -101,3 +101,21 @@ select:focus,input:focus{border-color:var(--accent-dim)}
   color:var(--text);padding:12px 18px;border-radius:8px;font-size:13px;display:none;max-width:420px;
   box-shadow:0 6px 24px rgba(0,0,0,.4);z-index:200;line-height:1.5}
 #toast.show{display:block}
+
+/* ---- 应用统计（M9）：横向条形图 + 饼图 ---- */
+.bar-row{display:flex;align-items:center;gap:10px;margin-bottom:9px}
+.bar-name{width:104px;flex-shrink:0;font-size:12px;color:var(--dim);text-align:right;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.bar-track{flex:1;height:16px;background:var(--panel2);border-radius:3px;overflow:hidden}
+.bar-fill{display:block;height:100%;background:var(--accent);border-radius:3px}
+.bar-fill.other{background:#6b5f52}
+.bar-value{width:122px;flex-shrink:0;font-size:12px;color:var(--text)}
+.pie-wrap{display:flex;align-items:center;gap:18px}
+.pie-wrap svg{flex-shrink:0}
+.legend{flex:1;display:grid;gap:7px;min-width:0}
+.legend-row{display:flex;align-items:center;gap:7px;font-size:12px;color:var(--dim)}
+.legend-row .swatch{width:9px;height:9px;border-radius:2px;flex-shrink:0}
+.legend-row .nm{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.legend-row .pct{margin-left:auto;color:var(--text);flex-shrink:0}
+.usage-head{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:18px}
+.usage-note{color:var(--dim);font-size:12px;margin-top:14px;line-height:1.7}

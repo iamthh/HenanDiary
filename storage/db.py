@@ -87,11 +87,22 @@ CREATE TABLE IF NOT EXISTS pending_report (
 )
 """
 
+# M9 新增（需求 F1.3 / F7）：只存进程名，不含窗口标题；duration_s 是写入时快照
+SCHEMA_APP_USAGE = """
+CREATE TABLE IF NOT EXISTS app_usage (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    timestamp   TEXT NOT NULL,
+    app         TEXT NOT NULL,
+    duration_s  INTEGER NOT NULL
+)
+"""
+
 ALL_SCHEMAS = (
     SCHEMA_SCREENSHOT_ANALYSIS,
     SCHEMA_DAILY_REPORT,
     SCHEMA_WEEKLY_REPORT,
     SCHEMA_PENDING_REPORT,
+    SCHEMA_APP_USAGE,
 )
 
 
@@ -368,6 +379,78 @@ def cleanup_old_data(days: int) -> None:
     log.info("素材清理 days=%s cutoff=%s 删除行数=%s", days, cutoff, cur.rowcount)
 
 
+def save_app_usage(timestamp: str, app: str, duration_s: int) -> int:
+    """写入一条前台应用采样记录，返回自增主键 id。
+
+    参数：
+        timestamp: ISO8601 时间戳，如 2026-09-18T10:05:00
+        app: 进程名（不含 .exe），如 Code；不含窗口标题（需求 F7.2 隐私边界）
+        duration_s: 本次采样代表的秒数。**调用方按当时的采集间隔算好再传**——
+            间隔可配（2/5/10 分钟），若留给查询侧乘"当前间隔"，用户改一次设置
+            就会让全部历史时长跟着变（需求 F7.1）
+    依赖：init_db 已调用。负责方：M9。
+    """
+    conn = _connect()
+    try:
+        with conn:
+            cur = conn.execute(
+                "INSERT INTO app_usage (timestamp, app, duration_s) VALUES (?, ?, ?)",
+                (timestamp, app, duration_s),
+            )
+    finally:
+        conn.close()
+    new_id = cur.lastrowid
+    log.debug("应用采样入库 id=%s app=%s duration_s=%s", new_id, app, duration_s)
+    return new_id
+
+
+def get_app_usage_summary(date: str) -> list[dict[str, Any]]:
+    """取某天各应用的使用时长汇总，按总时长降序。
+
+    参数：
+        date: YYYY-MM-DD
+    返回：
+        [{"app": str, "seconds": int, "samples": int}, ...]；无数据返回空列表。
+    依赖：init_db 已调用。负责方：M9。
+    """
+    conn = _connect()
+    try:
+        rows = conn.execute(
+            "SELECT app, SUM(duration_s) AS seconds, COUNT(*) AS samples"
+            " FROM app_usage WHERE timestamp >= ? AND timestamp < ?"
+            " GROUP BY app ORDER BY seconds DESC, app",
+            (f"{date}T00:00:00", f"{date}T24:00:00"),
+        ).fetchall()
+    finally:
+        conn.close()
+    return [dict(row) for row in rows]
+
+
+def cleanup_old_app_usage(days: int) -> int:
+    """删除超过保留期的应用使用明细，返回删除条数。
+
+    与 cleanup_old_data 分开、而不是并进去，因为两者保留期不同：
+    素材 3 天，应用明细 90 天（需求 D20——只留 3 天的话趋势图没数据可画）。
+    参数：
+        days: 保留天数，通常取 config 的 storage.usage_retention_days
+    依赖：init_db 已调用。负责方：M9。
+    """
+    # 口径与 cleanup_old_data 一致：保留「含当天在内最近 days 个自然日」
+    cutoff = (datetime.now().date() - timedelta(days=max(days - 1, 0))).isoformat()
+    conn = _connect()
+    try:
+        with conn:
+            cur = conn.execute(
+                "DELETE FROM app_usage WHERE timestamp < ?",
+                (f"{cutoff}T00:00:00",),
+            )
+    finally:
+        conn.close()
+    deleted = cur.rowcount
+    log.info("应用明细清理 days=%s cutoff=%s 删除行数=%s", days, cutoff, deleted)
+    return deleted
+
+
 # ------------------------------------------------- 接口变更记录（M0 发现并补齐）
 
 # 2026-09-14 补充 4 组接口。原因：技术方案第四节的接口清单按需求跑不通，具体如下。
@@ -386,3 +469,10 @@ def cleanup_old_data(days: int) -> None:
 #    补：get_weekly_report
 #
 # 至此接口共 13 个，M1 开工前不再变动。后续如需改签名，按开发规范 3.1 先通知对方。
+#
+# 2026-09-18 补充 3 个接口（M9 应用使用统计，需求 v0.5 的 F1.3 / F7）。接口扩到 16 个：
+#   1) save_app_usage / get_app_usage_summary —— 采集写入 + 按天按应用汇总（排行与趋势图用）
+#   2) cleanup_old_app_usage —— 应用明细保留 90 天，与素材的 3 天不同，不能并进
+#      cleanup_old_data（那个只有 days 一个参数，合并就表达不了两个保留期）
+# 同时新增 SCHEMA_APP_USAGE 表。契约测试表 FROZEN_SIGNATURES 已同步
+# （tests/test_storage/test_db.py），该文件会强制公开函数集合与契约表完全一致。

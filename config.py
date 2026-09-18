@@ -38,6 +38,7 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     },
     "storage": {
         "raw_retention_days": 3,
+        "usage_retention_days": 90,   # 应用使用明细保留期（需求 D20 / F7.1）
     },
     "onboarding": {
         "done": False,

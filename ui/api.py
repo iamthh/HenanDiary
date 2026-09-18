@@ -165,6 +165,32 @@ class Api:
         if self._tray_refresh:
             self._tray_refresh()
 
+    # ---------------------------------------------------------- 应用统计页
+
+    def get_app_usage(self, date: str) -> Any:
+        """某天的应用使用汇总（需求 F7.2）。只给结构化数据，画图归前端。"""
+
+        def run() -> dict[str, Any]:
+            rows = db.get_app_usage_summary(date)
+            total_s = sum(r["seconds"] for r in rows)
+            items = [
+                {
+                    "app": _friendly_app(r["app"]),
+                    "minutes": round(r["seconds"] / 60),
+                    "percent": round(r["seconds"] * 100 / total_s, 1) if total_s else 0.0,
+                    "samples": r["samples"],
+                }
+                for r in rows
+            ]
+            return {
+                "date": date,
+                "total_min": round(total_s / 60),
+                "samples": sum(r["samples"] for r in rows),
+                "items": items,
+            }
+
+        return self._guard(run)
+
     # ---------------------------------------------------------- 设置页
 
     def get_settings(self) -> Any:
@@ -319,6 +345,47 @@ class Api:
         if self._window:
             self._window.show()
             self._window.restore()
+
+
+# ---------------------------------------------------------- 应用名映射
+
+# 进程名 → 界面显示名（需求 F7.2）。只覆盖常见软件，未命中的原样显示——
+# 不做模糊匹配：猜错一个应用名比显示原始进程名更糟。
+_DISPLAY_NAMES = {
+    "Code": "VS Code",
+    "chrome": "Chrome",
+    "msedge": "Edge",
+    "firefox": "Firefox",
+    "WeChat": "微信",
+    "Weixin": "微信",
+    "DingTalk": "钉钉",
+    "Feishu": "飞书",
+    "Lark": "飞书",
+    "winword": "Word",
+    "excel": "Excel",
+    "powerpnt": "PowerPoint",
+    "wps": "WPS",
+    "et": "WPS 表格",
+    "wpp": "WPS 演示",
+    "notepad": "记事本",
+    "explorer": "文件资源管理器",
+    "WindowsTerminal": "Windows 终端",
+    "cmd": "命令提示符",
+    "powershell": "PowerShell",
+    "pwsh": "PowerShell",
+    "pycharm64": "PyCharm",
+    "idea64": "IntelliJ IDEA",
+    "obsidian": "Obsidian",
+    "Telegram": "Telegram",
+    "Discord": "Discord",
+    "Spotify": "Spotify",
+    "mstsc": "远程桌面",
+}
+
+
+def _friendly_app(process_name: str) -> str:
+    """进程名转显示名；没命中映射就原样返回。"""
+    return _DISPLAY_NAMES.get(process_name, process_name)
 
 
 def _dumps(obj: Any) -> str:
