@@ -33,6 +33,16 @@ function esc(s) {
   return String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 }
 
+/* 周报按「周一 ~ 周日」这一段存，列表里标出范围，避免把 week_start 误读成某一天。
+   纯日期运算，用本地时间构造避免时区偏移。 */
+function weekRange(weekStart) {
+  const [y, m, d] = weekStart.split('-').map(Number);
+  const end = new Date(y, m - 1, d + 6);
+  const mm = String(end.getMonth() + 1).padStart(2, '0');
+  const dd = String(end.getDate()).padStart(2, '0');
+  return `${weekStart} ~ ${mm}-${dd}`;
+}
+
 /* 极简 Markdown 渲染：够吃日报的 ## 标题 / 列表 / 段落 / 粗体 / 行内代码。
    不引第三方库（需求确认：无构建、无前端框架）。 */
 function renderMarkdown(md) {
@@ -179,7 +189,7 @@ async function loadReports() {
     const key = _kind === 'daily' ? row.date : row.week_start;
     const div = document.createElement('div');
     div.className = 'item';
-    div.textContent = key;
+    div.textContent = _kind === 'daily' ? key : weekRange(key);
     if (row.is_overwritten) div.textContent += ' · 补';
     div.addEventListener('click', () => {
       _selected = key;
@@ -201,9 +211,10 @@ async function loadReports() {
 async function showReport(key) {
   const r = await call('get_report', _kind, key);
   if (!r || r.error) { if (r) toast(r.error); return; }
+  const title = _kind === 'daily' ? key : weekRange(key) + ' 周报';
   $('rp-body').innerHTML =
     `<div class="row" style="justify-content:flex-end">
-       <span style="color:var(--dim);font-size:12px;margin-right:auto">生成于 ${esc(r.generated_at.replace('T',' '))}</span>
+       <span style="color:var(--dim);font-size:12px;margin-right:auto">${esc(title)}　·　生成于 ${esc(r.generated_at.replace('T',' '))}</span>
        <button class="ghost" id="btn-regen">重新生成</button></div>`
     + renderMarkdown(r.content_md);
   $('btn-regen').addEventListener('click', () => generate(_kind, _kind === 'daily' ? '今日日报' : '本周周报'));
