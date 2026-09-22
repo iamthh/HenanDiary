@@ -24,6 +24,22 @@ import config
 REQUEST_TIMEOUT_SECONDS = 60
 MAX_RETRIES = 5
 
+# 截图分析的分类枚举：日报的「时间分布」按这一列本地计数，所以必须是封闭集合，
+# 不能让模型自由发挥——否则每天的类别名都不一样，统计出来是一盘散沙。
+OTHER_CATEGORY = "其他"
+IMAGE_ANALYSIS_CATEGORIES = (
+    "编码", "终端", "文档", "沟通", "会议", "浏览", "设计", "影音", "游戏", OTHER_CATEGORY,
+)
+
+# 截图分析 Prompt：要求结构化输出（采集侧 collector.parse_analysis 负责解析与容错）
+IMAGE_ANALYSIS_PROMPT = (
+    "看这张屏幕截图，描述用户正在做什么。只输出一个 JSON 对象，"
+    "不要解释、不要 Markdown 代码块：\n"
+    '{"app": "前台应用或网站名", "category": "分类", "desc": "一句话描述，不超过30字"}\n'
+    f"category 必须从这些里选一个：{' / '.join(IMAGE_ANALYSIS_CATEGORIES)}。"
+    "识别不出应用名或分类时，app/category 给空字符串，但 desc 必须写。"
+)
+
 # DPAPI 加解密（CryptProtectData / CryptUnprotectData）绑定当前 Windows 用户，
 # 密文换机器或换用户解不开——单人使用场景正好。
 
@@ -96,7 +112,10 @@ class AIClient:
         return self._stream_text([{"role": "user", "content": prompt}], max_tokens=4096)
 
     def analyze_image(self, base64_image: str, mime: str = "image/jpeg") -> str:
-        """送截图给 AI，返回一句话文字描述。失败抛异常。
+        """送截图给 AI，返回结构化描述（JSON 原文）。失败抛异常。
+
+        返回的是**原文**，不在这里解析：模型可能夹带解释或代码块，
+        解析与容错统一交给 collector.parse_analysis，这一层只负责把请求发出去。
 
         mime 默认 image/jpeg：采集侧送的是压缩后的 JPEG（见 collector.shrink_for_ai），
         参数留出来是为了将来换回 PNG 或其它格式时不必改这里。
@@ -106,10 +125,7 @@ class AIClient:
                 {
                     "role": "user",
                     "content": [
-                        {
-                            "type": "text",
-                            "text": "描述这张屏幕截图中用户正在做什么，用一句话概括，不超过30字。",
-                        },
+                        {"type": "text", "text": IMAGE_ANALYSIS_PROMPT},
                         {
                             "type": "image_url",
                             "image_url": {"url": f"data:{mime};base64,{base64_image}"},

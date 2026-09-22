@@ -88,6 +88,43 @@ def test_daily_overwritten_flag_is_persisted(with_materials) -> None:
     assert "## 今日概览" in row["content_md"]
 
 
+# ---------------------------------------------------------------- 时间分布本地统计
+
+
+def test_daily_prompt_carries_local_distribution() -> None:
+    """时间分布改成按 category 逐条计数，不再让模型自己估。"""
+    db.init_db()
+    db.save_screenshot_analysis("2026-09-15T09:00:00", "写代码", app="PyCharm", category="编码")
+    db.save_screenshot_analysis("2026-09-15T09:05:00", "继续写", app="PyCharm", category="编码")
+    db.save_screenshot_analysis("2026-09-15T09:10:00", "回消息", app="飞书", category="沟通")
+    fake = _FakeAI()
+
+    generator.generate_daily_report("2026-09-15", ai=fake)
+
+    prompt = fake.prompts[0]
+    assert "编码：2 条（67%）" in prompt
+    assert "沟通：1 条（33%）" in prompt
+    assert "（编码） 写代码" in prompt  # 记录行带上分类，供聚类参考
+
+
+def test_daily_distribution_groups_legacy_rows_as_other() -> None:
+    """迁移前入库的老数据没有 category，统计时归「其他」，不能凭空消失。"""
+    db.init_db()
+    db.save_screenshot_analysis("2026-09-15T09:00:00", "老记录")
+    fake = _FakeAI()
+
+    generator.generate_daily_report("2026-09-15", ai=fake)
+
+    assert "其他：1 条（100%）" in fake.prompts[0]
+
+
+def test_distribution_lines_orders_by_count_desc() -> None:
+    lines = generator._distribution_lines([
+        {"category": "沟通"}, {"category": "编码"}, {"category": "编码"},
+    ])
+    assert lines.splitlines() == ["- 编码：2 条（67%）", "- 沟通：1 条（33%）"]
+
+
 # ---------------------------------------------------------------- 周报（M6）
 
 WEEKLY_OUTPUT = """## 本周概览

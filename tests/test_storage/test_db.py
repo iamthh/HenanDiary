@@ -15,10 +15,12 @@ from storage import db
 
 # 冻结的签名，参数名与顺序都在契约内。
 # 前 8 个来自技术方案「接口约定」，后 5 个是 M0 补齐的（见 storage/db.py 接口变更记录）。
+# 2026-09-22 显式变更一处：save_screenshot_analysis 增加 app / category 两个可选参数，
+# 为的是让日报的「时间分布」按分类本地统计，而不是让模型估（见 docs/开发状态.md 同节）。
 FROZEN_SIGNATURES: dict[str, list[str]] = {
     # 截图素材
     "init_db": [],
-    "save_screenshot_analysis": ["timestamp", "analysis"],
+    "save_screenshot_analysis": ["timestamp", "analysis", "app", "category"],
     "get_today_analyses": ["date"],
     "cleanup_old_data": ["days"],
     # 日报

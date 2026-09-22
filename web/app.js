@@ -162,7 +162,8 @@ async function loadTimeline(date) {
   for (const e of events) {
     const div = document.createElement('div');
     div.className = 'event';
-    div.innerHTML = `<div class="time">${esc(e.time)}</div><div class="desc">${esc(e.analysis)}</div>`;
+    const tag = e.category ? `<span class="tag">${esc(e.category)}</span>` : '';
+    div.innerHTML = `<div class="time">${esc(e.time)}</div><div class="desc">${tag}${esc(e.analysis)}</div>`;
     list.appendChild(div);
   }
   $('tl-empty').style.display = events.length ? 'none' : 'block';
