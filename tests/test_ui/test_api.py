@@ -49,6 +49,71 @@ def test_toggle_capture_flips_setting(api) -> None:
     assert api.toggle_capture() == {"enabled": True}
 
 
+# ---------------------------------------------------------------- 下次采集时间
+
+
+def _freeze_now(monkeypatch, hour: int, minute: int) -> None:
+    """把 ui.api 里的 datetime.now() 钉在今天的某个时刻，其余行为不变。"""
+    from datetime import date, datetime
+
+    today = date.today()
+
+    class _FrozenDatetime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return cls(today.year, today.month, today.day, hour, minute, 0)
+
+    monkeypatch.setattr("ui.api.datetime", _FrozenDatetime)
+
+
+def test_next_capture_outside_work_hours_points_to_tomorrow_morning(api, monkeypatch) -> None:
+    """旧实现在这种情况下会显示一个已经过去的时间（如 20:30 显示"下次 09:00"）。"""
+    from datetime import date, timedelta
+
+    _freeze_now(monkeypatch, 20, 30)
+
+    assert api.get_state()["capture"]["next_ts"] == \
+        f"{(date.today() + timedelta(days=1)).isoformat()}T09:00:00"
+
+
+def test_next_capture_before_work_hours_points_to_today(api, monkeypatch) -> None:
+    from datetime import date
+
+    _freeze_now(monkeypatch, 7, 0)
+
+    assert api.get_state()["capture"]["next_ts"] == f"{date.today().isoformat()}T09:00:00"
+
+
+def test_next_capture_inside_work_hours_is_not_in_the_past(api, monkeypatch) -> None:
+    from datetime import date
+
+    _freeze_now(monkeypatch, 15, 30)
+
+    assert api.get_state()["capture"]["next_ts"] == f"{date.today().isoformat()}T15:30:00"
+
+
+def test_next_capture_uses_last_record_plus_interval(api, monkeypatch) -> None:
+    from datetime import date
+
+    today = date.today().isoformat()
+    _freeze_now(monkeypatch, 15, 30)
+    db.save_screenshot_analysis(f"{today}T15:28:00", "刚采过")
+
+    assert api.get_state()["capture"]["next_ts"] == f"{today}T15:33:00"
+
+
+def test_next_capture_when_interval_crosses_end_of_day(api, monkeypatch) -> None:
+    """18:58 再等 5 分钟就下班了，下一轮实际不会发生，应顺延到明早。"""
+    from datetime import date, timedelta
+
+    today = date.today().isoformat()
+    _freeze_now(monkeypatch, 18, 58)
+    db.save_screenshot_analysis(f"{today}T18:58:00", "刚采过")
+
+    assert api.get_state()["capture"]["next_ts"] == \
+        f"{(date.today() + timedelta(days=1)).isoformat()}T09:00:00"
+
+
 # ---------------------------------------------------------------- 时间线
 
 def test_timeline_dates_only_within_retention(api) -> None:

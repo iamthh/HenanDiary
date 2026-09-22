@@ -24,7 +24,11 @@ WEB_DIR = Path(__file__).resolve().parent / "web"
 
 
 def _gen_report(argv: list[str]) -> int:
-    """手动生成日报。返回进程退出码。（与旧 CLI 行为一致，无 GUI。）"""
+    """手动生成日报。返回进程退出码。（无 GUI，供打包后命令行调用。）
+
+    生成结果只记日志、不打印正文：开发规范 1.3 禁止 print，且打包时 console=False，
+    打出去的正文本来就没人看得到。要看内容请开主窗口的「日报 / 周报」页。
+    """
     config.ensure_dirs()
     db.init_db()
     target = argv[0] if argv else _date.today().isoformat()
@@ -43,8 +47,8 @@ def _gen_report(argv: list[str]) -> int:
     if result.get("skipped"):
         log.info("未生成：%s", result["reason"])
         return 0
-    log.info("日报已生成 date=%s", target)
-    print(result["content_md"])
+    log.info("日报已生成 date=%s 正文=%d 字（在主窗口「日报 / 周报」页查看）",
+             target, len(result["content_md"]))
     return 0
 
 

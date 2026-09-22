@@ -45,6 +45,24 @@ DEFAULT_SETTINGS: dict[str, Any] = {
 }
 
 
+def parse_hhmm(text: str, field: str = "时间") -> tuple[int, int]:
+    """把 "HH:MM" 解析成 (时, 分)；格式或范围非法时抛 ValueError。
+
+    抽成公开函数的理由：写入前校验（_validate）与使用侧解析（scheduler / collector）
+    必须是同一套口径，否则会出现"值写进去了但任务起不来"的静默失效。
+    非法示例：非字符串、缺冒号、'abc'、'25:99'。
+    """
+    if not isinstance(text, str):
+        raise ValueError(f"{field} 必须是 HH:MM 字符串，收到: {text!r}")
+    hour_text, sep, minute_text = text.partition(":")
+    if sep != ":" or not hour_text.isdigit() or not minute_text.isdigit():
+        raise ValueError(f"{field} 必须是 HH:MM 格式，收到: {text!r}")
+    hour, minute = int(hour_text), int(minute_text)
+    if not (0 <= hour <= 23 and 0 <= minute <= 59):
+        raise ValueError(f"{field} 超出范围 00:00-23:59，收到: {text!r}")
+    return hour, minute
+
+
 def get_data_dir() -> Path:
     r"""数据根目录 %APPDATA%\HenanDiary\（只解析路径，不创建）。"""
     appdata = os.environ.get("APPDATA")
@@ -126,11 +144,29 @@ def update_settings(patch: dict[str, Any]) -> dict[str, Any]:
 
 
 def _validate(settings: dict[str, Any]) -> None:
+    """写入前校验全部可配置的取值。
+
+    为什么必须拦在这里：非法值一旦落盘，`scheduler.build_scheduler` 会在启动时抛异常
+    并被 `main._start_scheduler` 吞掉——采集与日报**再也不会跑**，而界面仍显示"采集运行中"。
+    这种静默失效查起来极贵，所以在写入这一道就掐死。
+    """
     interval = settings["capture"]["screenshot_interval_min"]
     if interval not in ALLOWED_INTERVAL_MIN:
         raise ValueError(
             f"截图间隔只允许 {sorted(ALLOWED_INTERVAL_MIN)} 分钟，收到: {interval!r}"
         )
+
+    work_hours = settings["capture"]["work_hours"]
+    start = parse_hhmm(work_hours["start"], "capture.work_hours.start")
+    end = parse_hhmm(work_hours["end"], "capture.work_hours.end")
+    if start >= end:
+        # 需求 F1.2 只要求一个工作时段，未定义跨天语义，所以结束必须晚于开始
+        raise ValueError(
+            f"工作时间结束须晚于开始（当前 {work_hours['start']}-{work_hours['end']}，不支持跨天）"
+        )
+
+    parse_hhmm(settings["report"]["daily_time"], "report.daily_time")
+    parse_hhmm(settings["report"]["overwrite_time"], "report.overwrite_time")
 
 
 def _deep_merge(base: dict[str, Any], patch: dict[str, Any]) -> dict[str, Any]:

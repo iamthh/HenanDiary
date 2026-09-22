@@ -1,17 +1,22 @@
-"""截图采集器：mss 纯内存截图 → AI 分析 → 存 SQLite。
+"""截图采集器：mss 纯内存截图 → 压缩 → AI 分析 → 存 SQLite。
 
 M1 验收目标：程序常驻期间按配置间隔自动采集，工作时间外跳过。
 开发规范 1.3：单轮失败只记 error 不抛出，采集循环不能因一次 AI 调用失败而停摆。
 调度（采集间隔/日报/周报/清理）统一收在 scheduler/jobs.py，本模块只管采集一轮。
+
+压缩是本模块的职责而非 AI 层的：技术方案六.1 要求"截图只在内存里处理"，
+缩图与转码同样全程在内存完成，落盘的依然只有 AI 产出的文字。
 """
 
 from __future__ import annotations
 
 import base64
+import io
 from datetime import datetime
 
 import mss
 import mss.tools
+from PIL import Image
 
 import config
 from ai.client import AIClient
@@ -19,6 +24,12 @@ from logger import get_logger
 from storage import db
 
 log = get_logger(__name__)
+
+# 送 AI 前的压缩目标。视觉模型的输入成本随像素量走：1920x1080 原图 PNG base64 后约 1.22MB，
+# 缩到宽 1024 转 JPEG(q80) 只要约 0.11MB（实测降约 91%），屏幕文字依然清晰可辨。
+MAX_AI_IMAGE_WIDTH = 1024
+AI_IMAGE_JPEG_QUALITY = 80
+AI_IMAGE_MIME = "image/jpeg"
 
 
 def capture_to_memory() -> bytes:
@@ -28,8 +39,25 @@ def capture_to_memory() -> bytes:
         return mss.tools.to_png(img.rgb, img.size)
 
 
-def to_base64(png_bytes: bytes) -> str:
-    return base64.b64encode(png_bytes).decode("utf-8")
+def shrink_for_ai(png_bytes: bytes) -> bytes:
+    """把截图缩到 AI 友好尺寸并转 JPEG，返回新字节流（同样只在内存里）。
+
+    为什么不直传原图：按 96 张/天、原图 base64 1.22MB 算，一天上传约 117MB，
+    而缩到宽 1024 后约 0.11MB。省的是带宽与 token，不是清晰度——
+    本工具的用途是"让模型看出你在干什么"，不需要 1:1 像素。
+    """
+    with Image.open(io.BytesIO(png_bytes)) as image:
+        rgb = image.convert("RGB")
+        if rgb.width > MAX_AI_IMAGE_WIDTH:
+            height = max(1, round(rgb.height * MAX_AI_IMAGE_WIDTH / rgb.width))
+            rgb = rgb.resize((MAX_AI_IMAGE_WIDTH, height), Image.LANCZOS)
+        buffer = io.BytesIO()
+        rgb.save(buffer, format="JPEG", quality=AI_IMAGE_JPEG_QUALITY, optimize=True)
+        return buffer.getvalue()
+
+
+def to_base64(image_bytes: bytes) -> str:
+    return base64.b64encode(image_bytes).decode("utf-8")
 
 
 class ScreenshotCollector:
@@ -40,9 +68,22 @@ class ScreenshotCollector:
 
     @staticmethod
     def in_work_hours(now: datetime, work_hours: dict) -> bool:
-        start = datetime.strptime(work_hours["start"], "%H:%M").time()
-        end = datetime.strptime(work_hours["end"], "%H:%M").time()
-        return start <= now.time() < end  # ponytail: 不跨天，09-19 这种够用
+        """是否落在工作时段内（不支持跨天，09:00-19:00 这种够用）。
+
+        配置非法时回落默认时段并记 error：校验上线前写入的坏值不能让采集长期瘫掉，
+        而"永远不采集"正是最难被发现的失效形态。
+        """
+        try:
+            start = config.parse_hhmm(work_hours["start"], "capture.work_hours.start")
+            end = config.parse_hhmm(work_hours["end"], "capture.work_hours.end")
+        except (ValueError, KeyError, TypeError):
+            fallback = config.DEFAULT_SETTINGS["capture"]["work_hours"]
+            log.error(
+                "工作时间配置非法 %r，本轮回落默认 %s-%s", work_hours, fallback["start"], fallback["end"]
+            )
+            start = config.parse_hhmm(fallback["start"])
+            end = config.parse_hhmm(fallback["end"])
+        return start <= (now.hour, now.minute) < end
 
     def run_once(self) -> None:
         """执行一轮采集。非工作时间直接跳过；失败抛异常由调度层记日志。"""
@@ -59,9 +100,11 @@ class ScreenshotCollector:
 
         png = capture_to_memory()
         try:
-            analysis = self._ai.analyze_image(to_base64(png))
+            jpeg = shrink_for_ai(png)
         finally:
-            del png  # 用完立即释放（技术方案六.1）
+            del png  # 原图用完立即释放（技术方案六.1）
+        analysis = self._ai.analyze_image(to_base64(jpeg), mime=AI_IMAGE_MIME)
+        del jpeg
         if not analysis.strip():
             raise ValueError("AI 返回空描述，视为失败")
         db.save_screenshot_analysis(now.isoformat(timespec="seconds"), analysis.strip())
