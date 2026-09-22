@@ -126,3 +126,20 @@ def test_missing_api_key_raises_runtime_error() -> None:
     config.update_settings({"ai": {"api_key_encrypted": ""}})
     with pytest.raises(RuntimeError):
         AIClient()
+
+
+def test_client_sets_timeout_and_retries(monkeypatch) -> None:
+    """不显式设置就是 SDK 默认的 600 秒超时：一次卡住会拖死整轮采集。"""
+    captured: dict = {}
+
+    class _FakeOpenAI:
+        def __init__(self, **kwargs) -> None:
+            captured.update(kwargs)
+
+    monkeypatch.setattr("openai.OpenAI", _FakeOpenAI)
+    config.update_settings({"ai": {"api_key_encrypted": encrypt_key("sk-test")}})
+    AIClient()
+
+    assert captured["timeout"] == 60
+    assert captured["max_retries"] == 5
+    assert captured["base_url"] == config.DEFAULT_SETTINGS["ai"]["base_url"]

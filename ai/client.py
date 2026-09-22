@@ -5,6 +5,11 @@
 
 三个调用统一走**流式**（见 _stream_text）：千问 Qwen-Omni 系列官方要求 stream=True、
 QVQ 系列仅支持流式输出；而 VL 系列与 OpenAI 官方模型同样兼容流式，所以不必维护两套。
+
+网络参数必须显式设置：openai SDK 默认 600 秒超时 + 2 次重试。采集是每 5 分钟一轮的
+后台任务，一次请求挂满 600 秒会把采集线程整轮拖死（调度器 max_instances=1 会静默跳过
+后续轮次，等于漏采）。所以超时压到 60 秒，重试放到 5 次——宁可快速失败让 APScheduler
+下一轮重来，也不要长时间占着线程。
 """
 
 from __future__ import annotations
@@ -14,6 +19,10 @@ import base64
 import win32crypt
 
 import config
+
+# 单次请求超时（秒）与 SDK 层重试次数（总尝试 = 1 + MAX_RETRIES）
+REQUEST_TIMEOUT_SECONDS = 60
+MAX_RETRIES = 5
 
 # DPAPI 加解密（CryptProtectData / CryptUnprotectData）绑定当前 Windows 用户，
 # 密文换机器或换用户解不开——单人使用场景正好。
@@ -44,6 +53,8 @@ class AIClient:
         self._client = OpenAI(
             api_key=decrypt_key(ai["api_key_encrypted"]),
             base_url=ai["base_url"],
+            timeout=REQUEST_TIMEOUT_SECONDS,
+            max_retries=MAX_RETRIES,
         )
         self._model = ai["model"]
 
