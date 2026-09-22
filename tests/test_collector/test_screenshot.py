@@ -21,6 +21,13 @@ def test_in_work_hours(hour: int, expected: bool) -> None:
     assert screenshot.ScreenshotCollector.in_work_hours(now, hours) is expected
 
 
+def test_in_work_hours_falls_back_on_bad_config() -> None:
+    """历史坏配置不能让采集长期不跑：回落默认 09:00-19:00 而不是抛异常。"""
+    bad = {"start": "abc", "end": "25:00"}
+    assert screenshot.ScreenshotCollector.in_work_hours(datetime(2026, 9, 15, 10, 30), bad) is True
+    assert screenshot.ScreenshotCollector.in_work_hours(datetime(2026, 9, 15, 8, 30), bad) is False
+
+
 class _FakeAI:
     def analyze_image(self, b64: str) -> str:
         assert b64, "应收到 base64 图片"

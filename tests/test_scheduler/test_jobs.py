@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import json
 from datetime import date, timedelta
 from typing import Any
 
@@ -265,5 +266,22 @@ def test_reschedule_moves_daily_job(monkeypatch) -> None:
         fields = {f.name: str(f) for f in scheduler.get_job("daily_report").trigger.fields}
         assert fields["hour"] == "21"
         assert fields["minute"] == "15"
+    finally:
+        scheduler.shutdown(wait=False)
+
+
+def test_build_scheduler_falls_back_on_corrupt_settings(monkeypatch) -> None:
+    """校验上线前写入的坏配置不能让调度器整体起不来——那等于采集与日报永久失效。"""
+    path = config.get_config_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({"report": {"daily_time": "abc", "overwrite_time": "25:99"}}),
+                    encoding="utf-8")
+
+    scheduler = _build(monkeypatch)
+    try:
+        fields = {f.name: str(f) for f in scheduler.get_job("daily_report").trigger.fields}
+        assert (int(fields["hour"]), int(fields["minute"])) == config.parse_hhmm(
+            config.DEFAULT_SETTINGS["report"]["daily_time"]
+        )
     finally:
         scheduler.shutdown(wait=False)

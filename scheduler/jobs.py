@@ -39,8 +39,21 @@ OnFailure = Callable[[str], None]
 
 
 def _parse_hhmm(text: str) -> tuple[int, int]:
-    hour, _, minute = text.partition(":")
-    return int(hour), int(minute)
+    """解析 HH:MM（口径统一在 config.parse_hhmm）。格式非法时抛 ValueError。"""
+    return config.parse_hhmm(text, "调度时间")
+
+
+def _parse_hhmm_or_default(text: str, default: str, field: str) -> tuple[int, int]:
+    """启动/重排路径专用：历史坏配置不能让整个调度器起不来。
+
+    校验上线前写入的配置可能已经是坏的（如 daily_time='abc'）。这里记 error 后回落到
+    默认值继续跑——"任务照常执行 + 日志留痕"远好过"调度器直接不启动且无人察觉"。
+    """
+    try:
+        return _parse_hhmm(text)
+    except (ValueError, TypeError, AttributeError):
+        log.error("配置项 %s 非法 %r，本次回落默认值 %s", field, text, default)
+        return _parse_hhmm(default)
 
 
 def _clear_pending(target: str, kind: str) -> int:
@@ -181,8 +194,15 @@ def build_scheduler(collector: Any, on_ai_failure: OnFailure | None = None) -> A
     from apscheduler.schedulers.background import BackgroundScheduler
 
     settings = config.load_settings()
-    hour, minute = _parse_hhmm(settings["report"]["daily_time"])
-    ow_hour, ow_minute = _parse_hhmm(settings["report"]["overwrite_time"])
+    report_defaults = config.DEFAULT_SETTINGS["report"]
+    hour, minute = _parse_hhmm_or_default(
+        settings["report"]["daily_time"], report_defaults["daily_time"], "report.daily_time"
+    )
+    ow_hour, ow_minute = _parse_hhmm_or_default(
+        settings["report"]["overwrite_time"],
+        report_defaults["overwrite_time"],
+        "report.overwrite_time",
+    )
     interval_min = settings["capture"]["screenshot_interval_min"]
 
     scheduler = BackgroundScheduler(
@@ -224,8 +244,15 @@ def build_scheduler(collector: Any, on_ai_failure: OnFailure | None = None) -> A
 def reschedule_report_jobs(scheduler: Any, settings: dict[str, Any] | None = None) -> None:
     """设置窗口改了日报/覆盖时间后重排，不重启即生效。"""
     settings = settings or config.load_settings()
-    hour, minute = _parse_hhmm(settings["report"]["daily_time"])
+    report_defaults = config.DEFAULT_SETTINGS["report"]
+    hour, minute = _parse_hhmm_or_default(
+        settings["report"]["daily_time"], report_defaults["daily_time"], "report.daily_time"
+    )
     scheduler.reschedule_job("daily_report", trigger="cron", hour=hour, minute=minute)
-    ow_hour, ow_minute = _parse_hhmm(settings["report"]["overwrite_time"])
+    ow_hour, ow_minute = _parse_hhmm_or_default(
+        settings["report"]["overwrite_time"],
+        report_defaults["overwrite_time"],
+        "report.overwrite_time",
+    )
     scheduler.reschedule_job("daily_overwrite", trigger="cron", hour=ow_hour, minute=ow_minute)
     log.info("日报调度已重排：生成 %02d:%02d，覆盖 %02d:%02d", hour, minute, ow_hour, ow_minute)

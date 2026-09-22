@@ -40,9 +40,22 @@ class ScreenshotCollector:
 
     @staticmethod
     def in_work_hours(now: datetime, work_hours: dict) -> bool:
-        start = datetime.strptime(work_hours["start"], "%H:%M").time()
-        end = datetime.strptime(work_hours["end"], "%H:%M").time()
-        return start <= now.time() < end  # ponytail: 不跨天，09-19 这种够用
+        """是否落在工作时段内（不支持跨天，09:00-19:00 这种够用）。
+
+        配置非法时回落默认时段并记 error：校验上线前写入的坏值不能让采集长期瘫掉，
+        而"永远不采集"正是最难被发现的失效形态。
+        """
+        try:
+            start = config.parse_hhmm(work_hours["start"], "capture.work_hours.start")
+            end = config.parse_hhmm(work_hours["end"], "capture.work_hours.end")
+        except (ValueError, KeyError, TypeError):
+            fallback = config.DEFAULT_SETTINGS["capture"]["work_hours"]
+            log.error(
+                "工作时间配置非法 %r，本轮回落默认 %s-%s", work_hours, fallback["start"], fallback["end"]
+            )
+            start = config.parse_hhmm(fallback["start"])
+            end = config.parse_hhmm(fallback["end"])
+        return start <= (now.hour, now.minute) < end
 
     def run_once(self) -> None:
         """执行一轮采集。非工作时间直接跳过；失败抛异常由调度层记日志。"""
