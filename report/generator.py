@@ -106,6 +106,8 @@ WEEKLY_PROMPT_TEMPLATE = """以下是用户 {start} ~ {end} 这一周已生成�
 
 ## 时间分布
 估算各类活动（如编码、沟通、浏览、文档等）在本周的占比，合计约 100%。
+每份日报标题下的引用行（概览/时间分布）来自当天的结构化记录，汇总时优先采用，
+比从正文里重新猜更准。
 
 只输出 Markdown 正文，不要输出 JSON 代码块。
 
@@ -114,16 +116,55 @@ WEEKLY_PROMPT_TEMPLATE = """以下是用户 {start} ~ {end} 这一周已生成�
 """
 
 
+def _daily_digest(content_json: str) -> str:
+    """把日报的结构化 JSON 压成一行摘要，附在当日正文之前。
+
+    这是 content_json 唯一的读取方（需求 F4.2 要求日报同时存一份结构化 JSON 供周报汇总；
+    在此之前它只写不读，是份死数据）。"时间分布"本来就该靠这些数字聚合，
+    让模型再从 Markdown 正文里猜一遍既费 token 又失真。
+    解析不出来就返回空串——周报退回只看正文，不影响生成。
+    """
+    try:
+        data = json.loads(content_json)
+    except (json.JSONDecodeError, TypeError):
+        return ""
+    if not isinstance(data, dict):
+        return ""
+
+    parts: list[str] = []
+    overview = str(data.get("overview") or "").strip()
+    if overview:
+        parts.append(f"概览：{overview}")
+    distribution = data.get("distribution")
+    if isinstance(distribution, list):
+        pairs = [
+            f"{item.get('category')} {item.get('percent')}%"
+            for item in distribution
+            if isinstance(item, dict)
+            and item.get("category")
+            and item.get("percent") is not None
+        ]
+        if pairs:
+            parts.append("时间分布：" + "、".join(pairs))
+    return " ｜ ".join(parts)
+
+
 def _monday_of(day: _date) -> _date:
     """取该日期所在周的周一，与 db.save_weekly_report 的 week_start 口径一致。"""
     return day - timedelta(days=day.weekday())
 
 
-def _build_weekly_prompt(week_start: str, reports: list[tuple[str, str]]) -> str:
+def _build_weekly_prompt(week_start: str, reports: list[tuple[str, str, str]]) -> str:
+    """拼周报 Prompt。reports 每项是 (日期, 日报正文, 结构化摘要行)，摘要为空则不附。"""
     end = (_date.fromisoformat(week_start) + timedelta(days=6)).isoformat()
-    body = "\n\n".join(f"### {day}\n{md}" for day, md in reports)
+    chunks: list[str] = []
+    for day, content_md, digest in reports:
+        head = f"### {day}"
+        if digest:
+            head += f"\n> {digest}"
+        chunks.append(f"{head}\n\n{content_md}")
     return WEEKLY_PROMPT_TEMPLATE.format(
-        start=week_start, end=end, count=len(reports), reports=body
+        start=week_start, end=end, count=len(reports), reports="\n\n".join(chunks)
     )
 
 
@@ -139,17 +180,19 @@ def generate_weekly_report(
 ) -> dict[str, Any]:
     """生成指定周的周报并落库，返回 db.get_weekly_report(week_start)。
 
-    week_start 缺省为本周周一。输入是该周周一到周日**已生成**的日报正文，
+    week_start 缺省为本周周一。    周报输入 = 该周周一到周日**已生成**的日报正文 + 其结构化摘要（content_json 的消费点），
     一份日报都没有时跳过、不落库，返回 {"skipped": True, "reason": ...}。
     幂等：同一周重复生成覆盖旧行（db 层按 week_start 唯一）。
     """
     week_start = week_start or _monday_of(_date.today()).isoformat()
     monday = _date.fromisoformat(week_start)
-    reports: list[tuple[str, str]] = []
+    reports: list[tuple[str, str, str]] = []
     for offset in range(7):
         row = db.get_daily_report((monday + timedelta(days=offset)).isoformat())
         if row:
-            reports.append((row["date"], row["content_md"]))
+            reports.append(
+                (row["date"], row["content_md"], _daily_digest(row["content_json"]))
+            )
     if not reports:
         log.info("周 %s 没有已生成的日报，跳过周报生成", week_start)
         return {"skipped": True, "reason": "本周没有已生成的日报"}

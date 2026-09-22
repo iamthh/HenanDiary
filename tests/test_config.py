@@ -77,3 +77,44 @@ def test_allowed_intervals_are_accepted(interval: int) -> None:
 def test_unknown_report_kind_is_rejected() -> None:
     with pytest.raises(ValueError):
         config.get_reports_dir("monthly")
+
+
+# ---------------------------------------------------------------- 时间字段校验
+
+
+@pytest.mark.parametrize("text,expected", [
+    ("9:00", (9, 0)), ("09:00", (9, 0)), ("23:59", (23, 59)), ("00:00", (0, 0)),
+])
+def test_parse_hhmm_accepts_valid_text(text: str, expected: tuple[int, int]) -> None:
+    assert config.parse_hhmm(text) == expected
+
+
+@pytest.mark.parametrize("text", ["abc", "25:00", "09:60", "0900", "09-00", "", None, 900])
+def test_parse_hhmm_rejects_invalid_text(text) -> None:
+    with pytest.raises(ValueError):
+        config.parse_hhmm(text)
+
+
+@pytest.mark.parametrize("field,value", [
+    ("daily_time", "abc"),
+    ("overwrite_time", "25:99"),
+])
+def test_update_settings_rejects_bad_report_time(field: str, value: str) -> None:
+    """坏时间一旦落盘，调度器下次启动就起不来（静默失效），必须在写入时拦下。"""
+    with pytest.raises(ValueError):
+        config.update_settings({"report": {field: value}})
+
+
+@pytest.mark.parametrize("start,end", [("abc", "19:00"), ("09:00", "25:00"), ("19:00", "09:00")])
+def test_update_settings_rejects_bad_work_hours(start: str, end: str) -> None:
+    with pytest.raises(ValueError):
+        config.update_settings({"capture": {"work_hours": {"start": start, "end": end}}})
+
+
+def test_bad_time_is_not_persisted() -> None:
+    """拦下来还不够——原文件必须保持上次的合法值，不能写坏。"""
+    config.update_settings({"report": {"daily_time": "21:30"}})
+    with pytest.raises(ValueError):
+        config.update_settings({"report": {"daily_time": "not-a-time"}})
+
+    assert config.load_settings()["report"]["daily_time"] == "21:30"
