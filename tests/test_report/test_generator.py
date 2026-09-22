@@ -162,3 +162,60 @@ def test_weekly_empty_output_raises() -> None:
     _seed_week()
     with pytest.raises(ValueError):
         generator.generate_weekly_report("2026-09-14", ai=_FakeAI("   "))
+
+
+# ---------------------------------------------------------------- 结构化 JSON 的消费
+
+
+def test_weekly_prompt_includes_structured_digest() -> None:
+    """F4.2 存下来的结构化 JSON 要真被周报用上，而不是只写不读的死数据。"""
+    db.init_db()
+    db.save_daily_report(
+        "2026-09-14",
+        "## 今日概览\n第一天",
+        '{"overview": "写完采集模块", "distribution": [{"category": "编码", "percent": 70}]}',
+    )
+    fake = _FakeAI(WEEKLY_OUTPUT)
+
+    generator.generate_weekly_report("2026-09-14", ai=fake)
+
+    assert "概览：写完采集模块" in fake.prompts[0]
+    assert "时间分布：编码 70%" in fake.prompts[0]
+
+
+def test_weekly_prompt_omits_digest_line_when_json_is_empty() -> None:
+    _seed_week()  # 两份日报的 content_json 都是 "{}"
+    fake = _FakeAI(WEEKLY_OUTPUT)
+
+    generator.generate_weekly_report("2026-09-14", ai=fake)
+
+    assert "> " not in fake.prompts[0]
+    assert "第一天" in fake.prompts[0]
+
+
+def test_weekly_digest_tolerates_broken_json() -> None:
+    """content_json 可能是半截或非对象 JSON，周报生成不能因此崩掉。"""
+    db.init_db()
+    db.save_daily_report("2026-09-14", "## 今日概览\n第一天", "{不是合法 json")
+    fake = _FakeAI(WEEKLY_OUTPUT)
+
+    generator.generate_weekly_report("2026-09-14", ai=fake)
+
+    assert "第一天" in fake.prompts[0]  # 正文照常进 Prompt
+    assert "> " not in fake.prompts[0]  # 解析不了就不附摘要行，不打断生成
+
+
+@pytest.mark.parametrize("content_json,expected", [
+    ("{}", ""),
+    ("[]", ""),
+    ('{"overview": "只有概览"}', "概览：只有概览"),
+    (
+        '{"distribution": [{"category": "编码", "percent": 70},'
+        ' {"category": "沟通", "percent": 30}]}',
+        "时间分布：编码 70%、沟通 30%",
+    ),
+    ('{"overview": "两件都说了", "distribution": [{"category": "浏览", "percent": 20}]}',
+     "概览：两件都说了 ｜ 时间分布：浏览 20%"),
+])
+def test_daily_digest_rendering(content_json: str, expected: str) -> None:
+    assert generator._daily_digest(content_json) == expected
