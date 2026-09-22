@@ -126,3 +126,64 @@ def test_run_once_safe_swallows_exception(monkeypatch: pytest.MonkeyPatch) -> No
         lambda: (_ for _ in ()).throw(RuntimeError("屏幕锁定")),
     )
     _new_collector().run_once_safe()  # 不应抛出
+
+
+# ---------------------------------------------------------------- 结构化解析
+
+
+def test_parse_analysis_plain_json() -> None:
+    parsed = screenshot.parse_analysis('{"app": "PyCharm", "category": "编码", "desc": "在改调度"}')
+    assert (parsed.app, parsed.category, parsed.desc) == ("PyCharm", "编码", "在改调度")
+
+
+def test_parse_analysis_tolerates_code_fence_and_chatter() -> None:
+    """模型爱把 JSON 裹进 ```json 块、前面再客气一句，两种都得认。"""
+    raw = '好的：\n```json\n{"app": "Chrome", "category": "浏览", "desc": "查文档"}\n```'
+    parsed = screenshot.parse_analysis(raw)
+    assert (parsed.app, parsed.category, parsed.desc) == ("Chrome", "浏览", "查文档")
+
+
+def test_parse_analysis_falls_back_to_raw_text() -> None:
+    """解析不了就当普通描述存下——采集每 5 分钟一轮，不能因为格式问题丢掉素材。"""
+    parsed = screenshot.parse_analysis("在看文档")
+    assert parsed.desc == "在看文档"
+    assert (parsed.app, parsed.category) == (None, None)
+
+
+def test_parse_analysis_maps_unknown_category_to_other() -> None:
+    """野生类别名会让本地统计变成一盘散沙，一律归「其他」。"""
+    parsed = screenshot.parse_analysis('{"app": "X", "category": "摸鱼", "desc": "发呆"}')
+    assert parsed.category == "其他"
+
+
+def test_parse_analysis_blank_app_and_category() -> None:
+    parsed = screenshot.parse_analysis('{"app": "", "category": "", "desc": "什么都没写"}')
+    assert (parsed.app, parsed.category) == (None, None)
+
+
+def test_parse_analysis_uses_app_when_desc_missing() -> None:
+    parsed = screenshot.parse_analysis('{"app": "Excel", "category": "文档", "desc": ""}')
+    assert parsed.desc == "正在使用 Excel"
+    assert parsed.category == "文档"
+
+
+def test_parse_analysis_empty_input() -> None:
+    assert screenshot.parse_analysis("   ").desc == ""
+
+
+def test_run_once_stores_structured_fields(monkeypatch: pytest.MonkeyPatch) -> None:
+    """落库要带上 app / category，日报的本地统计才有数据可用。"""
+    db.init_db()
+    config.update_settings({"capture": {"work_hours": {"start": "00:00", "end": "23:59"}}})
+    _patch_capture(monkeypatch)
+
+    class _Structured:
+        def analyze_image(self, b64: str, mime: str = "image/jpeg") -> str:
+            return '{"app": "PyCharm", "category": "编码", "desc": "在写采集器"}'
+
+    collector = _new_collector()
+    collector._ai = _Structured()
+    collector.run_once()
+
+    row = db.get_today_analyses(datetime.now().strftime("%Y-%m-%d"))[0]
+    assert (row["analysis"], row["app"], row["category"]) == ("在写采集器", "PyCharm", "编码")
