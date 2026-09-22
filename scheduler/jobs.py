@@ -168,21 +168,26 @@ def retry_pending(on_ai_failure: OnFailure | None = None) -> dict[str, int]:
 
 
 def catch_up_missed_reports(on_ai_failure: OnFailure | None = None) -> list[str]:
-    """补上错过 22:00 而根本没跑的日报，返回补生成的日期列表。
+    """补上错过 22:00 而根本没跑的历史日报，返回补生成的日期列表。
 
-    覆盖"22:00 时机器关机/休眠"（需求 F2.1）：早上开机时补出昨天那份，标覆盖版。
-    只查昨天——今天的等到当天 22:00 正常跑就够了。
-    有素材才算漏：没采集数据的日期本来就该跳过，不能凭空造日报。
+    覆盖"22:00 时机器关机/休眠"（需求 F2.1）：开机时把漏掉的补出来，标覆盖版。
+    扫描范围 = 素材保留期（默认 3 天）内的自然日，不含今天——今天的等当天 22:00 正常跑。
+    上限取保留期而非无限回溯，是因为超期素材已被清理，没有素材的日期本来就该跳过，
+    不能凭空造日报；关机多天回来时，保留期内的每一天都补得回来。
     与 retry_pending 互补：那边处理"跑了但 AI 失败"的欠账，这边处理"压根没跑"。
     """
-    yesterday = (_date.today() - timedelta(days=1)).isoformat()
-    if db.get_daily_report(yesterday) is not None:
-        return []
-    if not db.get_today_analyses(yesterday):
-        return []
-    log.info("发现漏生成的日报 date=%s，补生成并标覆盖版", yesterday)
-    run_daily_report(yesterday, is_overwritten=True, on_ai_failure=on_ai_failure)
-    return [yesterday]
+    retention_days = config.load_settings()["storage"]["raw_retention_days"]
+    generated: list[str] = []
+    for offset in range(1, retention_days + 1):
+        target = (_date.today() - timedelta(days=offset)).isoformat()
+        if db.get_daily_report(target) is not None:
+            continue  # 已有日报，漏的只可能是"根本没生成"的日子
+        if not db.get_today_analyses(target):
+            continue
+        log.info("发现漏生成的日报 date=%s，补生成并标覆盖版", target)
+        run_daily_report(target, is_overwritten=True, on_ai_failure=on_ai_failure)
+        generated.append(target)
+    return generated
 
 
 def build_scheduler(collector: Any, on_ai_failure: OnFailure | None = None) -> Any:

@@ -215,6 +215,37 @@ def test_catch_up_skips_when_no_materials(monkeypatch) -> None:
     assert jobs.catch_up_missed_reports() == []
 
 
+def test_catch_up_fills_every_missing_day_within_retention(monkeypatch) -> None:
+    """关机好几天回来：保留期内每个缺日报的日子都要补，不能只看昨天。"""
+    db.init_db()
+    offsets = (1, 2)
+    for offset in offsets:
+        day = (date.today() - timedelta(days=offset)).isoformat()
+        db.save_screenshot_analysis(f"{day}T10:00:00", f"素材{offset}")
+    generated: list[str] = []
+
+    def _fake(target, is_overwritten=False):
+        generated.append(target)
+        return {"date": target}
+
+    monkeypatch.setattr(jobs, "generate_daily_report", _fake)
+
+    expected = [(date.today() - timedelta(days=o)).isoformat() for o in offsets]
+    assert jobs.catch_up_missed_reports() == expected
+    assert generated == expected
+
+
+def test_catch_up_stops_at_retention_window(monkeypatch) -> None:
+    """超出素材保留期的日期不再扫：素材已被清理，硬生成只会造出空日报。"""
+    db.init_db()
+    retention = config.DEFAULT_SETTINGS["storage"]["raw_retention_days"]
+    beyond = (date.today() - timedelta(days=retention + 1)).isoformat()
+    db.save_screenshot_analysis(f"{beyond}T10:00:00", "过期素材")
+    monkeypatch.setattr(jobs, "generate_daily_report", lambda *a, **k: pytest.fail("不该生成"))
+
+    assert jobs.catch_up_missed_reports() == []
+
+
 # ---------------------------------------------------------------- 清理
 
 
