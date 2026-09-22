@@ -23,6 +23,53 @@ from storage import db
 log = get_logger(__name__)
 
 
+def _parse_work_hours(capture: dict[str, Any]) -> tuple[tuple[int, int], tuple[int, int]]:
+    """解析工作时段；历史坏配置回落默认值（与 collector.in_work_hours 同一口径）。"""
+    work_hours = capture["work_hours"]
+    try:
+        return (
+            config.parse_hhmm(work_hours["start"], "capture.work_hours.start"),
+            config.parse_hhmm(work_hours["end"], "capture.work_hours.end"),
+        )
+    except (ValueError, KeyError, TypeError):
+        fallback = config.DEFAULT_SETTINGS["capture"]["work_hours"]
+        log.error(
+            "工作时间配置非法 %r，推算下次采集时回落默认 %s-%s",
+            work_hours, fallback["start"], fallback["end"],
+        )
+        return config.parse_hhmm(fallback["start"]), config.parse_hhmm(fallback["end"])
+
+
+def _next_work_start(now: datetime, start: tuple[int, int]) -> datetime:
+    """下一个工作时段开始时刻：今天还没到点就是今天，否则明天。"""
+    today_start = now.replace(hour=start[0], minute=start[1], second=0, microsecond=0)
+    return today_start if now < today_start else today_start + timedelta(days=1)
+
+
+def _next_capture_at(now: datetime, capture: dict[str, Any], last_ts: str | None) -> datetime:
+    """推算下一次采集时刻，三种情况分开算。
+
+    旧实现只在"当天没有采集记录"时拿工作时段起点当答案，于是下午打开界面会看到
+    「下次截图 09:00」这种已经过去的时间。现在：
+    - 工作时间外：下一个工作时段开始
+    - 工作时间内且有记录：上一条 + 采集间隔；间隔落到了下班之后，就顺延到下一个工作日
+    - 工作时间内且当天还没采过（或上一轮已过期）：就是现在，马上要采
+    """
+    start, end = _parse_work_hours(capture)
+    if not (start <= (now.hour, now.minute) < end):
+        return _next_work_start(now, start)
+
+    if last_ts:
+        candidate = datetime.fromisoformat(last_ts) + timedelta(
+            minutes=capture["screenshot_interval_min"]
+        )
+        if candidate > now:
+            if (candidate.hour, candidate.minute) < end:
+                return candidate
+            return _next_work_start(now, start)  # 这一轮会落在下班后，实际不再采
+    return now
+
+
 class Api:
     def __init__(self) -> None:
         self._window = None                       # pywebview.Window
@@ -65,15 +112,8 @@ class Api:
         capture = settings["capture"]
         next_ts = None
         if capture["enabled"]:
-            interval = timedelta(minutes=capture["screenshot_interval_min"])
-            if last_ts:
-                candidate = datetime.fromisoformat(last_ts) + interval
-                next_ts = max(candidate, datetime.now()).isoformat(timespec="seconds")
-            else:
-                start = datetime.strptime(capture["work_hours"]["start"], "%H:%M")
-                next_ts = (start if start.date() >= _date.today() else start.replace(
-                    year=_date.today().year, month=_date.today().month, day=_date.today().day)
-                ).isoformat(timespec="seconds")
+            now = datetime.now()
+            next_ts = _next_capture_at(now, capture, last_ts).isoformat(timespec="seconds")
         report = db.get_daily_report(today)
         pending = db.get_pending_reports()
         return {
