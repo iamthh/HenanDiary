@@ -12,13 +12,13 @@ from datetime import date as _date, timedelta
 from typing import Any
 
 import config
-from ai.client import AIClient
+from ai.client import AIClient, OTHER_CATEGORY
 from logger import get_logger
 from storage import db
 
 log = get_logger(__name__)
 
-PROMPT_TEMPLATE = """以下是用户 {date} 一天的电脑使用截图分析记录，共 {count} 条。
+PROMPT_TEMPLATE = """以下是用户 {date} 一天的电脑使用截图分析记录，共 {count} 条，每条带活动分类。
 请据此生成一份中文日报，严格包含以下三个 Markdown 二级标题板块：
 
 ## 今日概览
@@ -28,21 +28,52 @@ PROMPT_TEMPLATE = """以下是用户 {date} 一天的电脑使用截图分析记
 按项目/任务聚类，列出每块在什么时间段做了什么。
 
 ## 时间分布
-估算各类活动（如编码、沟通、浏览、文档等）的占比，合计约 100%。
+直接采用下面给出的「本地统计」，它是按分类逐条计数算出来的，不要自己重新估算。
+逐项列出即可。
 
 正文最后另起一段，输出一个 ```json 代码块，字段如下（供程序汇总，不含多余文字）：
 {{"overview": "概览一句话",
  "blocks": [{{"topic": "任务名", "start": "HH:MM", "end": "HH:MM"}}],
  "distribution": [{{"category": "类别", "percent": 数字}}]}}
 
+本地统计（按分类计数，共 {count} 条）：
+{distribution}
+
 记录：
 {records}
 """
 
 
+def _distribution_lines(analyses: list[dict[str, Any]]) -> str:
+    """按 category 逐条统计占比，作为日报「时间分布」的事实依据。
+
+    截图是离散采样（5 分钟一张），但分类是逐条标出来的，计数比让模型再估一遍可靠得多。
+    迁移前入库的老数据没有 category，统一归「其他」。
+    """
+    counts: dict[str, int] = {}
+    for item in analyses:
+        category = item.get("category") or OTHER_CATEGORY
+        counts[category] = counts.get(category, 0) + 1
+    total = sum(counts.values())
+    ordered = sorted(counts.items(), key=lambda pair: (-pair[1], pair[0]))
+    return "\n".join(
+        f"- {name}：{count} 条（{round(count / total * 100)}%）" for name, count in ordered
+    )
+
+
 def _build_prompt(date: str, analyses: list[dict[str, Any]]) -> str:
-    records = "\n".join(f"- [{a['timestamp']}] {a['analysis']}" for a in analyses)
-    return PROMPT_TEMPLATE.format(date=date, count=len(analyses), records=records)
+    records = "\n".join(
+        f"- [{item['timestamp']}]"
+        + (f"（{item['category']}）" if item.get("category") else "")
+        + f" {item['analysis']}"
+        for item in analyses
+    )
+    return PROMPT_TEMPLATE.format(
+        date=date,
+        count=len(analyses),
+        distribution=_distribution_lines(analyses),
+        records=records,
+    )
 
 
 def _split_md_and_json(text: str) -> tuple[str, str]:

@@ -169,6 +169,8 @@ class Api:
             return [{
                 "time": r["timestamp"][11:16],
                 "analysis": r["analysis"],
+                "app": r["app"],
+                "category": r["category"],
             } for r in reversed(rows)]  # 需求：从最近一次往下展示
         return self._guard(run)
 
