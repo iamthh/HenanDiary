@@ -98,7 +98,8 @@ def test_test_connection_uses_stream() -> None:
     assert calls.calls[0]["max_tokens"] == 1024
 
 
-def test_analyze_image_sends_base64_png_as_stream() -> None:
+def test_analyze_image_defaults_to_jpeg_data_url() -> None:
+    """采集侧送的是压缩后的 JPEG，默认 mime 必须与之一致，否则模型解不出图。"""
     client, calls = _client_with([_FakeChunk("在看文档")])
 
     assert client.analyze_image("QUJD") == "在看文档"
@@ -107,6 +108,15 @@ def test_analyze_image_sends_base64_png_as_stream() -> None:
     assert kwargs["stream"] is True
     assert kwargs["max_tokens"] == 1024
     content = kwargs["messages"][0]["content"]
+    assert content[1]["image_url"]["url"] == "data:image/jpeg;base64,QUJD"
+
+
+def test_analyze_image_accepts_explicit_mime() -> None:
+    client, calls = _client_with([_FakeChunk("ok")])
+
+    client.analyze_image("QUJD", mime="image/png")
+
+    content = calls.calls[0]["messages"][0]["content"]
     assert content[1]["image_url"]["url"] == "data:image/png;base64,QUJD"
 
 

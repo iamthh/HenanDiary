@@ -95,8 +95,12 @@ class AIClient:
         """
         return self._stream_text([{"role": "user", "content": prompt}], max_tokens=4096)
 
-    def analyze_image(self, base64_png: str) -> str:
-        """送截图给 AI，返回一句话文字描述。失败抛异常。"""
+    def analyze_image(self, base64_image: str, mime: str = "image/jpeg") -> str:
+        """送截图给 AI，返回一句话文字描述。失败抛异常。
+
+        mime 默认 image/jpeg：采集侧送的是压缩后的 JPEG（见 collector.shrink_for_ai），
+        参数留出来是为了将来换回 PNG 或其它格式时不必改这里。
+        """
         return self._stream_text(
             [
                 {
@@ -108,7 +112,7 @@ class AIClient:
                         },
                         {
                             "type": "image_url",
-                            "image_url": {"url": f"data:image/png;base64,{base64_png}"},
+                            "image_url": {"url": f"data:{mime};base64,{base64_image}"},
                         },
                     ],
                 }
