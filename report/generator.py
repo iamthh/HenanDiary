@@ -12,7 +12,7 @@ from datetime import date as _date, timedelta
 from typing import Any
 
 import config
-from ai.client import AIClient, OTHER_CATEGORY
+from ai.client import AIClient, IMAGE_ANALYSIS_CATEGORIES, OTHER_CATEGORY
 from logger import get_logger
 from storage import db
 
@@ -136,9 +136,7 @@ WEEKLY_PROMPT_TEMPLATE = """以下是用户 {start} ~ {end} 这一周已生成�
 按项目/任务聚类，说明每项在本周推进到什么程度。
 
 ## 时间分布
-估算各类活动（如编码、沟通、浏览、文档等）在本周的占比，合计约 100%。
-每份日报标题下的引用行（概览/时间分布）来自当天的结构化记录，汇总时优先采用，
-比从正文里重新猜更准。
+{distribution_block}
 
 只输出 Markdown 正文，不要输出 JSON 代码块。
 
@@ -146,20 +144,38 @@ WEEKLY_PROMPT_TEMPLATE = """以下是用户 {start} ~ {end} 这一周已生成�
 {reports}
 """
 
+# 有结构化分布可用时的「时间分布」段：与日报同一思路，本地算好让模型照抄。
+_WEEKLY_LOCAL_BLOCK = (
+    "直接采用下面给出的「本地统计」，它是 {days} 天日报的结构化分布按天平均的结果，"
+    "不要自己重新估算，逐项列出即可。\n\n本地统计（周占比）：\n{lines}"
+)
+# 一天可用分布都没有时退回原话术，让模型估——有引用行兜着，仍比凭空猜强。
+_WEEKLY_ESTIMATE_BLOCK = (
+    "估算各类活动（如编码、沟通、浏览、文档等）在本周的占比，合计约 100%。"
+    "每份日报标题下的引用行（概览/时间分布）来自当天的结构化记录，汇总时优先采用，"
+    "比从正文里重新猜更准。"
+)
+
+
+def _load_daily_json(content_json: str) -> dict[str, Any] | None:
+    """解析日报的结构化 JSON；坏 JSON 或非对象一律返回 None。digest 与周分布共用。"""
+    try:
+        data = json.loads(content_json)
+    except (json.JSONDecodeError, TypeError):
+        return None
+    return data if isinstance(data, dict) else None
+
 
 def _daily_digest(content_json: str) -> str:
     """把日报的结构化 JSON 压成一行摘要，附在当日正文之前。
 
-    这是 content_json 唯一的读取方（需求 F4.2 要求日报同时存一份结构化 JSON 供周报汇总；
+    content_json 的读取方（需求 F4.2 要求日报同时存一份结构化 JSON 供周报汇总；
     在此之前它只写不读，是份死数据）。"时间分布"本来就该靠这些数字聚合，
     让模型再从 Markdown 正文里猜一遍既费 token 又失真。
     解析不出来就返回空串——周报退回只看正文，不影响生成。
     """
-    try:
-        data = json.loads(content_json)
-    except (json.JSONDecodeError, TypeError):
-        return ""
-    if not isinstance(data, dict):
+    data = _load_daily_json(content_json)
+    if data is None:
         return ""
 
     parts: list[str] = []
@@ -185,7 +201,47 @@ def _monday_of(day: _date) -> _date:
     return day - timedelta(days=day.weekday())
 
 
-def _build_weekly_prompt(week_start: str, reports: list[tuple[str, str, str]]) -> str:
+def _normalize_day_distribution(raw: Any) -> dict[str, float]:
+    """把一份日报 JSON 里的 distribution 洗成 {分类: 占比}。
+
+    野生类别名归「其他」（与 collector.parse_analysis 同一规则，否则同一个类会以
+    两个名字各算一份）；同一天里同类重复出现按求和处理；percent 缺失或非数字的条目丢弃。
+    """
+    day: dict[str, float] = {}
+    if not isinstance(raw, list):
+        return day
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        name = str(item.get("category") or "").strip()
+        percent = item.get("percent")
+        if not name or isinstance(percent, bool) or not isinstance(percent, (int, float)):
+            continue
+        if name not in IMAGE_ANALYSIS_CATEGORIES:
+            name = OTHER_CATEGORY
+        day[name] = day.get(name, 0.0) + percent
+    return day
+
+
+def _weekly_distribution_lines(day_maps: list[dict[str, float]]) -> str:
+    """把多天的时间分布按天平均成周占比，输出与日报「本地统计」同款的行。
+
+    每天的分布本来就是按分类逐条计数得来的；某天缺某类 = 那天该类为 0 条，
+    按 0 计入平均（分类是封闭集合，缺项是真 0，不是没数据）。
+    用落库的整数占比做平均而不是原始计数：素材只保留 3 天，上周的计数已不可考。
+    """
+    categories = {name for day in day_maps for name in day}
+    averages = {
+        name: round(sum(day.get(name, 0.0) for day in day_maps) / len(day_maps))
+        for name in categories
+    }
+    ordered = sorted(averages.items(), key=lambda pair: (-pair[1], pair[0]))
+    return "\n".join(f"- {name}：{p}%" for name, p in ordered)
+
+
+def _build_weekly_prompt(
+    week_start: str, reports: list[tuple[str, str, str]], distribution_block: str
+) -> str:
     """拼周报 Prompt。reports 每项是 (日期, 日报正文, 结构化摘要行)，摘要为空则不附。"""
     end = (_date.fromisoformat(week_start) + timedelta(days=6)).isoformat()
     chunks: list[str] = []
@@ -195,7 +251,8 @@ def _build_weekly_prompt(week_start: str, reports: list[tuple[str, str, str]]) -
             head += f"\n> {digest}"
         chunks.append(f"{head}\n\n{content_md}")
     return WEEKLY_PROMPT_TEMPLATE.format(
-        start=week_start, end=end, count=len(reports), reports="\n\n".join(chunks)
+        start=week_start, end=end, count=len(reports), reports="\n\n".join(chunks),
+        distribution_block=distribution_block,
     )
 
 
@@ -213,23 +270,41 @@ def generate_weekly_report(
 
     week_start 缺省为本周周一。    周报输入 = 该周周一到周日**已生成**的日报正文 + 其结构化摘要（content_json 的消费点），
     一份日报都没有时跳过、不落库，返回 {"skipped": True, "reason": ...}。
+    「时间分布」优先用各天 content_json 里的分布按天平均（本地统计，模型照抄）；
+    一天可用分布都没有才退回让模型估算。
     幂等：同一周重复生成覆盖旧行（db 层按 week_start 唯一）。
     """
     week_start = week_start or _monday_of(_date.today()).isoformat()
     monday = _date.fromisoformat(week_start)
     reports: list[tuple[str, str, str]] = []
+    day_maps: list[dict[str, float]] = []
     for offset in range(7):
         row = db.get_daily_report((monday + timedelta(days=offset)).isoformat())
         if row:
             reports.append(
                 (row["date"], row["content_md"], _daily_digest(row["content_json"]))
             )
+            day_map = _normalize_day_distribution(
+                (_load_daily_json(row["content_json"]) or {}).get("distribution")
+            )
+            if day_map:
+                day_maps.append(day_map)
     if not reports:
         log.info("周 %s 没有已生成的日报，跳过周报生成", week_start)
         return {"skipped": True, "reason": "本周没有已生成的日报"}
 
+    if day_maps:
+        distribution_block = _WEEKLY_LOCAL_BLOCK.format(
+            days=len(day_maps), lines=_weekly_distribution_lines(day_maps)
+        )
+        log.info("周报时间分布走本地统计：%d 天有结构化分布", len(day_maps))
+    else:
+        distribution_block = _WEEKLY_ESTIMATE_BLOCK
+
     client = ai or AIClient()
-    content_md = _strip_json_block(client.analyze_text(_build_weekly_prompt(week_start, reports)))
+    content_md = _strip_json_block(
+        client.analyze_text(_build_weekly_prompt(week_start, reports, distribution_block))
+    )
     if not content_md:
         raise ValueError("AI 返回空周报正文")
     db.save_weekly_report(week_start, content_md)
