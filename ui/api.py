@@ -207,6 +207,25 @@ class Api:
         if self._tray_refresh:
             self._tray_refresh()
 
+    def copy_text(self, text: str) -> Any:
+        """把文本放进系统剪贴板（报表页「复制全文」用）。
+
+        不走前端 navigator.clipboard：WebView2 对它的权限行为不可控；
+        pywin32 本来就是依赖，Python 侧写剪贴板最稳。
+        """
+        def run() -> dict[str, Any]:
+            import win32clipboard
+
+            win32clipboard.OpenClipboard()
+            try:
+                win32clipboard.EmptyClipboard()
+                win32clipboard.SetClipboardData(win32clipboard.CF_UNICODETEXT, text)
+            finally:
+                win32clipboard.CloseClipboard()
+            log.info("已复制文本到剪贴板（%d 字）", len(text))
+            return {"ok": True}
+        return self._guard(run)
+
     # ---------------------------------------------------------- 设置页
 
     def get_settings(self) -> Any:
