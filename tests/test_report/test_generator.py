@@ -256,3 +256,69 @@ def test_weekly_digest_tolerates_broken_json() -> None:
 ])
 def test_daily_digest_rendering(content_json: str, expected: str) -> None:
     assert generator._daily_digest(content_json) == expected
+
+
+# ---------------------------------------------------------------- 周报时间分布本地汇总
+
+
+def test_weekly_prompt_averages_daily_distributions() -> None:
+    """周报时间分布走本地统计：各天结构化分布按天平均，模型照抄不重估。"""
+    db.init_db()
+    db.save_daily_report(
+        "2026-09-14", "第一天",
+        '{"overview": "a", "distribution": [{"category": "编码", "percent": 60},'
+        ' {"category": "沟通", "percent": 40}]}',
+    )
+    db.save_daily_report(
+        "2026-09-16", "第三天",
+        '{"overview": "b", "distribution": [{"category": "编码", "percent": 20}]}',
+    )
+    fake = _FakeAI(WEEKLY_OUTPUT)
+
+    generator.generate_weekly_report("2026-09-14", ai=fake)
+
+    prompt = fake.prompts[0]
+    assert "本地统计" in prompt
+    assert "编码：40%" in prompt  # (60 + 20) / 2
+    assert "沟通：20%" in prompt  # 第二天没有该类按 0 计：(40 + 0) / 2
+
+
+def test_weekly_distribution_normalizes_wild_category() -> None:
+    """模型在日报 JSON 里吐的野生类别名要归「其他」，不能另立名目分裂统计。"""
+    db.init_db()
+    db.save_daily_report(
+        "2026-09-14", "第一天",
+        '{"distribution": [{"category": "摸鱼", "percent": 50}]}',
+    )
+    fake = _FakeAI(WEEKLY_OUTPUT)
+
+    generator.generate_weekly_report("2026-09-14", ai=fake)
+
+    assert "其他：50%" in fake.prompts[0]
+
+
+def test_weekly_falls_back_to_estimate_without_any_distribution() -> None:
+    _seed_week()  # 两份日报的 content_json 都是 "{}"，一天可用分布都没有
+    fake = _FakeAI(WEEKLY_OUTPUT)
+
+    generator.generate_weekly_report("2026-09-14", ai=fake)
+
+    prompt = fake.prompts[0]
+    assert "本地统计" not in prompt
+    assert "估算各类活动" in prompt
+
+
+def test_weekly_ignores_broken_json_when_averaging() -> None:
+    """坏 JSON 的日子不进平均，好日子照常算，正文照附，不打断生成。"""
+    db.init_db()
+    db.save_daily_report(
+        "2026-09-14", "第一天",
+        '{"distribution": [{"category": "编码", "percent": 60}]}',
+    )
+    db.save_daily_report("2026-09-16", "第三天", "{不是合法 json")
+    fake = _FakeAI(WEEKLY_OUTPUT)
+
+    generator.generate_weekly_report("2026-09-14", ai=fake)
+
+    assert "编码：60%" in fake.prompts[0]
+    assert "第一天" in fake.prompts[0] and "第三天" in fake.prompts[0]

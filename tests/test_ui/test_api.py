@@ -223,3 +223,42 @@ def test_clear_data_keeps_settings_and_exports(api) -> None:
     assert db.list_daily_reports() == [] and db.list_weekly_reports() == []
     assert db.get_today_analyses("2026-09-01") == []
     assert config.load_settings()["onboarding"] is not None  # 设置保留
+
+
+# ---------------------------------------------------------------- 复制全文
+
+def test_copy_text_writes_unicode_to_clipboard(api, monkeypatch) -> None:
+    import win32clipboard
+
+    calls: dict = {}
+    monkeypatch.setattr(win32clipboard, "OpenClipboard",
+                        lambda: calls.__setitem__("open", True))
+    monkeypatch.setattr(win32clipboard, "EmptyClipboard",
+                        lambda: calls.__setitem__("empty", True))
+    monkeypatch.setattr(win32clipboard, "SetClipboardData",
+                        lambda fmt, data: calls.update({"fmt": fmt, "data": data}))
+    monkeypatch.setattr(win32clipboard, "CloseClipboard",
+                        lambda: calls.__setitem__("close", True))
+
+    assert api.copy_text("## 今日概览\n写了一天代码") == {"ok": True}
+    assert calls["fmt"] == win32clipboard.CF_UNICODETEXT
+    assert calls["data"] == "## 今日概览\n写了一天代码"
+    assert calls["open"] and calls["empty"] and calls["close"]
+
+
+def test_copy_text_closes_clipboard_on_error(api, monkeypatch) -> None:
+    import win32clipboard
+
+    closed: list[bool] = []
+
+    def _boom(fmt, data):
+        raise OSError("clipboard busy")
+
+    monkeypatch.setattr(win32clipboard, "OpenClipboard", lambda: None)
+    monkeypatch.setattr(win32clipboard, "EmptyClipboard", lambda: None)
+    monkeypatch.setattr(win32clipboard, "SetClipboardData", _boom)
+    monkeypatch.setattr(win32clipboard, "CloseClipboard", lambda: closed.append(True))
+
+    result = api.copy_text("x")
+    assert "error" in result
+    assert closed == [True]  # 异常时也必须关剪贴板，否则全局剪贴板被锁死

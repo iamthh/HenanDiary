@@ -56,6 +56,34 @@ def decrypt_key(encrypted: str) -> str:
     return win32crypt.CryptUnprotectData(blob, None, None, None, 0)[1].decode("utf-8")
 
 
+def classify_ai_error(e: BaseException) -> str:
+    """把 AI 调用异常归类成用户能懂的一句话（需求 F2.4：失败需明确告知原因）。
+
+    认得出的给一句可操作的中文；认不出的一律回退原异常类型与信息——分类宁可少
+    不可错，排查线索不能丢（开发规范 1.3）。openai 延迟导入，与 AIClient 同理：
+    没装 openai 时本模块的 DPAPI 加解密也要可用。
+    """
+    fallback = f"{type(e).__name__}: {e}"
+    try:
+        import openai
+    except ImportError:
+        return fallback
+
+    raw = str(e).lower()
+    if any(k in raw for k in ("insufficient", "arrear", "余额", "欠费")):
+        # 各家"余额不足"的状态码不统一（429 配额、403 欠费都有），按报文关键词认
+        return "账户余额不足，请充值后等待下一轮自动重试"
+    if isinstance(e, openai.AuthenticationError):
+        return "API Key 无效或已失效，请在设置里重新配置"
+    if isinstance(e, openai.PermissionDeniedError):
+        return "无权访问该模型，请确认 Key 权限与模型名"
+    if isinstance(e, openai.RateLimitError):
+        return "请求被限流，请确认账户额度，等待下一轮自动重试"
+    if isinstance(e, openai.APIConnectionError):  # 超时 APITimeoutError 是它的子类
+        return "网络不通或无法访问 AI 服务，请检查网络与 Base URL"
+    return fallback
+
+
 class AIClient:
     """截图分析调用入口。"""
 
