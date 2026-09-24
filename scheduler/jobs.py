@@ -8,7 +8,7 @@
 
 AI 失败不吞（开发规范 1.3）：记一笔 pending_report 欠账 + 回调通知界面（需求 D14 托盘变红）。
 
-调度层不 import PySide6、不 import mss：只依赖 config / db / generator / cleanup，
+调度层不 import PySide6、不 import mss：只依赖 config / db / generator / cleanup / ai（仅错误归类），
 界面通知通过 on_ai_failure 回调出去，采集器通过鸭子类型传进来（只要它有 run_once_safe）。
 """
 
@@ -19,6 +19,7 @@ from functools import partial
 from typing import Any, Callable
 
 import config
+from ai.client import classify_ai_error
 from logger import get_logger
 from report.generator import generate_daily_report, generate_weekly_report
 from storage import db
@@ -89,7 +90,7 @@ def run_daily_report(
     try:
         result = generate_daily_report(target, is_overwritten=is_overwritten)
     except Exception as e:
-        reason = f"{type(e).__name__}: {e}"
+        reason = classify_ai_error(e)
         log.exception("日报生成失败 date=%s 覆盖版=%s，登记欠账", target, is_overwritten)
         _clear_pending(target, "daily")  # 先清旧账再记新账，同一日期只留最新一条原因
         db.add_pending_report(target, "daily", reason)
@@ -118,7 +119,7 @@ def run_weekly_report(
     try:
         result = generate_weekly_report(target)
     except Exception as e:
-        reason = f"{type(e).__name__}: {e}"
+        reason = classify_ai_error(e)
         log.exception("周报生成失败 week_start=%s，登记欠账", target)
         _clear_pending(target, "weekly")
         db.add_pending_report(target, "weekly", reason)

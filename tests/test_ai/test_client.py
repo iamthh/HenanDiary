@@ -11,7 +11,7 @@ from __future__ import annotations
 import pytest
 
 import config
-from ai.client import AIClient, decrypt_key, encrypt_key
+from ai.client import AIClient, classify_ai_error, decrypt_key, encrypt_key
 
 
 class _FakeDelta:
@@ -153,3 +153,44 @@ def test_client_sets_timeout_and_retries(monkeypatch) -> None:
     assert captured["timeout"] == 60
     assert captured["max_retries"] == 5
     assert captured["base_url"] == config.DEFAULT_SETTINGS["ai"]["base_url"]
+
+
+# ---------------------------------------------------------------- 失败原因归类（F2.4）
+
+
+def _mk(cls, message: str) -> Exception:
+    """用 __new__ 绕开构造（与上面 AIClient 同一手法）。
+
+    真 openai 异常的构造要造 httpx2 响应对象，与被测的分类逻辑无关——
+    isinstance 只认类，str 只读 args。
+    """
+    err = cls.__new__(cls)
+    err.args = (message,)
+    return err
+
+
+def test_classify_auth_error_as_bad_key() -> None:
+    import openai
+
+    assert classify_ai_error(_mk(openai.AuthenticationError, "invalid api key")) \
+        == "API Key 无效或已失效，请在设置里重新配置"
+
+
+def test_classify_connection_error_as_network() -> None:
+    """超时 APITimeoutError 是 APIConnectionError 的子类，两者都归网络问题。"""
+    import openai
+
+    assert "网络不通" in classify_ai_error(_mk(openai.APIConnectionError, "Connection error."))
+
+
+def test_classify_quota_keyword_as_balance() -> None:
+    """余额不足的状态码各家不一（429 配额、403 欠费都有），按报文关键词认。"""
+    import openai
+
+    err = _mk(openai.RateLimitError, "Error code: 429 - insufficient quota")
+    assert "余额不足" in classify_ai_error(err)
+
+
+def test_classify_unknown_exception_keeps_original_info() -> None:
+    """认不出的回退原异常类型与信息：分类宁可少不可错，排查线索不能丢。"""
+    assert classify_ai_error(ValueError("boom")) == "ValueError: boom"
