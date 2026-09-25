@@ -60,6 +60,8 @@ select:focus,input:focus{border-color:var(--accent-dim)}
   background:var(--accent);border:2px solid var(--bg)}
 .event .time{font-size:12px;color:var(--dim)}
 .event .desc{font-size:14px;margin-top:4px}
+.event .tag{display:inline-block;font-size:11px;color:var(--accent);background:var(--panel2);
+  border:1px solid var(--border);border-radius:4px;padding:1px 6px;margin-right:6px}
 
 .report-layout{display:flex;gap:16px;height:calc(100vh - 130px)}
 .date-list{width:190px;flex-shrink:0;background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);overflow-y:auto}

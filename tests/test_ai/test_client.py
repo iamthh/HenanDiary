@@ -11,7 +11,7 @@ from __future__ import annotations
 import pytest
 
 import config
-from ai.client import AIClient, decrypt_key, encrypt_key
+from ai.client import AIClient, classify_ai_error, decrypt_key, encrypt_key
 
 
 class _FakeDelta:
@@ -98,7 +98,8 @@ def test_test_connection_uses_stream() -> None:
     assert calls.calls[0]["max_tokens"] == 1024
 
 
-def test_analyze_image_sends_base64_png_as_stream() -> None:
+def test_analyze_image_defaults_to_jpeg_data_url() -> None:
+    """采集侧送的是压缩后的 JPEG，默认 mime 必须与之一致，否则模型解不出图。"""
     client, calls = _client_with([_FakeChunk("在看文档")])
 
     assert client.analyze_image("QUJD") == "在看文档"
@@ -107,6 +108,15 @@ def test_analyze_image_sends_base64_png_as_stream() -> None:
     assert kwargs["stream"] is True
     assert kwargs["max_tokens"] == 1024
     content = kwargs["messages"][0]["content"]
+    assert content[1]["image_url"]["url"] == "data:image/jpeg;base64,QUJD"
+
+
+def test_analyze_image_accepts_explicit_mime() -> None:
+    client, calls = _client_with([_FakeChunk("ok")])
+
+    client.analyze_image("QUJD", mime="image/png")
+
+    content = calls.calls[0]["messages"][0]["content"]
     assert content[1]["image_url"]["url"] == "data:image/png;base64,QUJD"
 
 
@@ -126,3 +136,61 @@ def test_missing_api_key_raises_runtime_error() -> None:
     config.update_settings({"ai": {"api_key_encrypted": ""}})
     with pytest.raises(RuntimeError):
         AIClient()
+
+
+def test_client_sets_timeout_and_retries(monkeypatch) -> None:
+    """不显式设置就是 SDK 默认的 600 秒超时：一次卡住会拖死整轮采集。"""
+    captured: dict = {}
+
+    class _FakeOpenAI:
+        def __init__(self, **kwargs) -> None:
+            captured.update(kwargs)
+
+    monkeypatch.setattr("openai.OpenAI", _FakeOpenAI)
+    config.update_settings({"ai": {"api_key_encrypted": encrypt_key("sk-test")}})
+    AIClient()
+
+    assert captured["timeout"] == 60
+    assert captured["max_retries"] == 5
+    assert captured["base_url"] == config.DEFAULT_SETTINGS["ai"]["base_url"]
+
+
+# ---------------------------------------------------------------- 失败原因归类（F2.4）
+
+
+def _mk(cls, message: str) -> Exception:
+    """用 __new__ 绕开构造（与上面 AIClient 同一手法）。
+
+    真 openai 异常的构造要造 httpx2 响应对象，与被测的分类逻辑无关——
+    isinstance 只认类，str 只读 args。
+    """
+    err = cls.__new__(cls)
+    err.args = (message,)
+    return err
+
+
+def test_classify_auth_error_as_bad_key() -> None:
+    import openai
+
+    assert classify_ai_error(_mk(openai.AuthenticationError, "invalid api key")) \
+        == "API Key 无效或已失效，请在设置里重新配置"
+
+
+def test_classify_connection_error_as_network() -> None:
+    """超时 APITimeoutError 是 APIConnectionError 的子类，两者都归网络问题。"""
+    import openai
+
+    assert "网络不通" in classify_ai_error(_mk(openai.APIConnectionError, "Connection error."))
+
+
+def test_classify_quota_keyword_as_balance() -> None:
+    """余额不足的状态码各家不一（429 配额、403 欠费都有），按报文关键词认。"""
+    import openai
+
+    err = _mk(openai.RateLimitError, "Error code: 429 - insufficient quota")
+    assert "余额不足" in classify_ai_error(err)
+
+
+def test_classify_unknown_exception_keeps_original_info() -> None:
+    """认不出的回退原异常类型与信息：分类宁可少不可错，排查线索不能丢。"""
+    assert classify_ai_error(ValueError("boom")) == "ValueError: boom"

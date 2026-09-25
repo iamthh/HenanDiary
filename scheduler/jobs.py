@@ -8,7 +8,7 @@
 
 AI 失败不吞（开发规范 1.3）：记一笔 pending_report 欠账 + 回调通知界面（需求 D14 托盘变红）。
 
-调度层不 import PySide6、不 import mss：只依赖 config / db / generator / cleanup，
+调度层不 import PySide6、不 import mss：只依赖 config / db / generator / cleanup / ai（仅错误归类），
 界面通知通过 on_ai_failure 回调出去，采集器通过鸭子类型传进来（只要它有 run_once_safe）。
 M9 追加应用采样 job（id="app_usage"）：采样器同理走鸭子类型，那个模块只调 Win32 API、
 不拖 mss；工作时间门控放在 run_app_usage，采集器只管采一轮。
@@ -21,6 +21,7 @@ from functools import partial
 from typing import Any, Callable
 
 import config
+from ai.client import classify_ai_error
 from logger import get_logger
 from report.generator import generate_daily_report, generate_weekly_report
 from storage import db
@@ -41,8 +42,21 @@ OnFailure = Callable[[str], None]
 
 
 def _parse_hhmm(text: str) -> tuple[int, int]:
-    hour, _, minute = text.partition(":")
-    return int(hour), int(minute)
+    """解析 HH:MM（口径统一在 config.parse_hhmm）。格式非法时抛 ValueError。"""
+    return config.parse_hhmm(text, "调度时间")
+
+
+def _parse_hhmm_or_default(text: str, default: str, field: str) -> tuple[int, int]:
+    """启动/重排路径专用：历史坏配置不能让整个调度器起不来。
+
+    校验上线前写入的配置可能已经是坏的（如 daily_time='abc'）。这里记 error 后回落到
+    默认值继续跑——"任务照常执行 + 日志留痕"远好过"调度器直接不启动且无人察觉"。
+    """
+    try:
+        return _parse_hhmm(text)
+    except (ValueError, TypeError, AttributeError):
+        log.error("配置项 %s 非法 %r，本次回落默认值 %s", field, text, default)
+        return _parse_hhmm(default)
 
 
 def _clear_pending(target: str, kind: str) -> int:
@@ -78,7 +92,7 @@ def run_daily_report(
     try:
         result = generate_daily_report(target, is_overwritten=is_overwritten)
     except Exception as e:
-        reason = f"{type(e).__name__}: {e}"
+        reason = classify_ai_error(e)
         log.exception("日报生成失败 date=%s 覆盖版=%s，登记欠账", target, is_overwritten)
         _clear_pending(target, "daily")  # 先清旧账再记新账，同一日期只留最新一条原因
         db.add_pending_report(target, "daily", reason)
@@ -107,7 +121,7 @@ def run_weekly_report(
     try:
         result = generate_weekly_report(target)
     except Exception as e:
-        reason = f"{type(e).__name__}: {e}"
+        reason = classify_ai_error(e)
         log.exception("周报生成失败 week_start=%s，登记欠账", target)
         _clear_pending(target, "weekly")
         db.add_pending_report(target, "weekly", reason)
@@ -177,21 +191,26 @@ def retry_pending(on_ai_failure: OnFailure | None = None) -> dict[str, int]:
 
 
 def catch_up_missed_reports(on_ai_failure: OnFailure | None = None) -> list[str]:
-    """补上错过 22:00 而根本没跑的日报，返回补生成的日期列表。
+    """补上错过 22:00 而根本没跑的历史日报，返回补生成的日期列表。
 
-    覆盖"22:00 时机器关机/休眠"（需求 F2.1）：早上开机时补出昨天那份，标覆盖版。
-    只查昨天——今天的等到当天 22:00 正常跑就够了。
-    有素材才算漏：没采集数据的日期本来就该跳过，不能凭空造日报。
+    覆盖"22:00 时机器关机/休眠"（需求 F2.1）：开机时把漏掉的补出来，标覆盖版。
+    扫描范围 = 素材保留期（默认 3 天）内的自然日，不含今天——今天的等当天 22:00 正常跑。
+    上限取保留期而非无限回溯，是因为超期素材已被清理，没有素材的日期本来就该跳过，
+    不能凭空造日报；关机多天回来时，保留期内的每一天都补得回来。
     与 retry_pending 互补：那边处理"跑了但 AI 失败"的欠账，这边处理"压根没跑"。
     """
-    yesterday = (_date.today() - timedelta(days=1)).isoformat()
-    if db.get_daily_report(yesterday) is not None:
-        return []
-    if not db.get_today_analyses(yesterday):
-        return []
-    log.info("发现漏生成的日报 date=%s，补生成并标覆盖版", yesterday)
-    run_daily_report(yesterday, is_overwritten=True, on_ai_failure=on_ai_failure)
-    return [yesterday]
+    retention_days = config.load_settings()["storage"]["raw_retention_days"]
+    generated: list[str] = []
+    for offset in range(1, retention_days + 1):
+        target = (_date.today() - timedelta(days=offset)).isoformat()
+        if db.get_daily_report(target) is not None:
+            continue  # 已有日报，漏的只可能是"根本没生成"的日子
+        if not db.get_today_analyses(target):
+            continue
+        log.info("发现漏生成的日报 date=%s，补生成并标覆盖版", target)
+        run_daily_report(target, is_overwritten=True, on_ai_failure=on_ai_failure)
+        generated.append(target)
+    return generated
 
 
 def build_scheduler(collector: Any, on_ai_failure: OnFailure | None = None) -> Any:
@@ -206,8 +225,15 @@ def build_scheduler(collector: Any, on_ai_failure: OnFailure | None = None) -> A
     from collector.app_usage import AppUsageCollector
 
     settings = config.load_settings()
-    hour, minute = _parse_hhmm(settings["report"]["daily_time"])
-    ow_hour, ow_minute = _parse_hhmm(settings["report"]["overwrite_time"])
+    report_defaults = config.DEFAULT_SETTINGS["report"]
+    hour, minute = _parse_hhmm_or_default(
+        settings["report"]["daily_time"], report_defaults["daily_time"], "report.daily_time"
+    )
+    ow_hour, ow_minute = _parse_hhmm_or_default(
+        settings["report"]["overwrite_time"],
+        report_defaults["overwrite_time"],
+        "report.overwrite_time",
+    )
     interval_min = settings["capture"]["screenshot_interval_min"]
 
     scheduler = BackgroundScheduler(
@@ -257,8 +283,15 @@ def build_scheduler(collector: Any, on_ai_failure: OnFailure | None = None) -> A
 def reschedule_report_jobs(scheduler: Any, settings: dict[str, Any] | None = None) -> None:
     """设置窗口改了日报/覆盖时间后重排，不重启即生效。"""
     settings = settings or config.load_settings()
-    hour, minute = _parse_hhmm(settings["report"]["daily_time"])
+    report_defaults = config.DEFAULT_SETTINGS["report"]
+    hour, minute = _parse_hhmm_or_default(
+        settings["report"]["daily_time"], report_defaults["daily_time"], "report.daily_time"
+    )
     scheduler.reschedule_job("daily_report", trigger="cron", hour=hour, minute=minute)
-    ow_hour, ow_minute = _parse_hhmm(settings["report"]["overwrite_time"])
+    ow_hour, ow_minute = _parse_hhmm_or_default(
+        settings["report"]["overwrite_time"],
+        report_defaults["overwrite_time"],
+        "report.overwrite_time",
+    )
     scheduler.reschedule_job("daily_overwrite", trigger="cron", hour=ow_hour, minute=ow_minute)
     log.info("日报调度已重排：生成 %02d:%02d，覆盖 %02d:%02d", hour, minute, ow_hour, ow_minute)

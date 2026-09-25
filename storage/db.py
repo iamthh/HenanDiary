@@ -52,9 +52,17 @@ SCHEMA_SCREENSHOT_ANALYSIS = """
 CREATE TABLE IF NOT EXISTS screenshot_analysis (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     timestamp   TEXT NOT NULL,
-    analysis    TEXT NOT NULL
+    analysis    TEXT NOT NULL,
+    app         TEXT,
+    category    TEXT
 )
 """
+
+# 后加的列：老库的建表语句早就落盘了，CREATE TABLE IF NOT EXISTS 不会给已有表补列，
+# 所以 init_db 里另有一道 ALTER TABLE 迁移（见 _ensure_columns）。
+ADDED_COLUMNS: dict[str, dict[str, str]] = {
+    "screenshot_analysis": {"app": "TEXT", "category": "TEXT"},
+}
 
 SCHEMA_DAILY_REPORT = """
 CREATE TABLE IF NOT EXISTS daily_report (
@@ -109,8 +117,22 @@ ALL_SCHEMAS = (
 # ---------------------------------------------------------------- 接口（M0 冻结）
 
 
+def _ensure_columns(conn: sqlite3.Connection) -> None:
+    """给已存在的旧表补上后加的列（幂等）。
+
+    SQLite 的 CREATE TABLE IF NOT EXISTS 只对新库生效，老用户的库得靠 ALTER TABLE 补，
+    否则升级后一写入新列就报 "no such column"。
+    """
+    for table, columns in ADDED_COLUMNS.items():
+        existing = {row["name"] for row in conn.execute(f"PRAGMA table_info({table})")}
+        for name, decl in columns.items():
+            if name not in existing:
+                conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {decl}")
+                log.info("数据库迁移：%s 补列 %s %s", table, name, decl)
+
+
 def init_db() -> None:
-    """建库建表，幂等；程序启动时调用一次。
+    """建库建表（含给旧库补列），幂等；程序启动时调用一次。
 
     依赖：无。负责方：M1。
     """
@@ -119,30 +141,40 @@ def init_db() -> None:
         with conn:
             for sql in ALL_SCHEMAS:
                 conn.execute(sql)
+            _ensure_columns(conn)
     finally:
         conn.close()
     log.info("数据库就绪: %s", config.get_db_path())
 
 
-def save_screenshot_analysis(timestamp: str, analysis: str) -> int:
+def save_screenshot_analysis(
+    timestamp: str,
+    analysis: str,
+    app: str | None = None,
+    category: str | None = None,
+) -> int:
     """写入一条截图分析结果，返回自增主键 id。
 
     参数：
         timestamp: ISO8601 时间戳，如 2026-09-14T10:05:00
         analysis: AI 对该截图的文字描述（不含图片，图片绝不落盘）
+        app: 前台应用/网站名，AI 未能识别时为 None
+        category: 活动分类（取自 ai.client.IMAGE_ANALYSIS_CATEGORIES），未识别时为 None；
+            日报的「时间分布」由这一列本地精确统计，不再让模型估
     依赖：init_db 已调用。负责方：M1。
     """
     conn = _connect()
     try:
         with conn:
             cur = conn.execute(
-                "INSERT INTO screenshot_analysis (timestamp, analysis) VALUES (?, ?)",
-                (timestamp, analysis),
+                "INSERT INTO screenshot_analysis (timestamp, analysis, app, category)"
+                " VALUES (?, ?, ?, ?)",
+                (timestamp, analysis, app, category),
             )
     finally:
         conn.close()
     new_id = cur.lastrowid
-    log.info("截图分析入库 id=%s timestamp=%s", new_id, timestamp)
+    log.info("截图分析入库 id=%s timestamp=%s category=%s", new_id, timestamp, category)
     return new_id
 
 
@@ -152,13 +184,15 @@ def get_today_analyses(date: str) -> list[dict[str, Any]]:
     参数：
         date: YYYY-MM-DD
     返回：
-        [{"id": int, "timestamp": str, "analysis": str}, ...]；无数据返回空列表。
+        [{"id": int, "timestamp": str, "analysis": str, "app": str|None,
+          "category": str|None}, ...]；无数据返回空列表。
+        app / category 对迁移前入库的老数据为 None，调用方按「其他」归类。
     依赖：init_db 已调用。负责方：M1。
     """
     conn = _connect()
     try:
         rows = conn.execute(
-            "SELECT id, timestamp, analysis FROM screenshot_analysis"
+            "SELECT id, timestamp, analysis, app, category FROM screenshot_analysis"
             " WHERE timestamp >= ? AND timestamp < ? ORDER BY timestamp",
             (f"{date}T00:00:00", f"{date}T24:00:00"),
         ).fetchall()

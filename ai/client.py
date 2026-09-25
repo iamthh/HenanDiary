@@ -5,6 +5,11 @@
 
 三个调用统一走**流式**（见 _stream_text）：千问 Qwen-Omni 系列官方要求 stream=True、
 QVQ 系列仅支持流式输出；而 VL 系列与 OpenAI 官方模型同样兼容流式，所以不必维护两套。
+
+网络参数必须显式设置：openai SDK 默认 600 秒超时 + 2 次重试。采集是每 5 分钟一轮的
+后台任务，一次请求挂满 600 秒会把采集线程整轮拖死（调度器 max_instances=1 会静默跳过
+后续轮次，等于漏采）。所以超时压到 60 秒，重试放到 5 次——宁可快速失败让 APScheduler
+下一轮重来，也不要长时间占着线程。
 """
 
 from __future__ import annotations
@@ -14,6 +19,26 @@ import base64
 import win32crypt
 
 import config
+
+# 单次请求超时（秒）与 SDK 层重试次数（总尝试 = 1 + MAX_RETRIES）
+REQUEST_TIMEOUT_SECONDS = 60
+MAX_RETRIES = 5
+
+# 截图分析的分类枚举：日报的「时间分布」按这一列本地计数，所以必须是封闭集合，
+# 不能让模型自由发挥——否则每天的类别名都不一样，统计出来是一盘散沙。
+OTHER_CATEGORY = "其他"
+IMAGE_ANALYSIS_CATEGORIES = (
+    "编码", "终端", "文档", "沟通", "会议", "浏览", "设计", "影音", "游戏", OTHER_CATEGORY,
+)
+
+# 截图分析 Prompt：要求结构化输出（采集侧 collector.parse_analysis 负责解析与容错）
+IMAGE_ANALYSIS_PROMPT = (
+    "看这张屏幕截图，描述用户正在做什么。只输出一个 JSON 对象，"
+    "不要解释、不要 Markdown 代码块：\n"
+    '{"app": "前台应用或网站名", "category": "分类", "desc": "一句话描述，不超过30字"}\n'
+    f"category 必须从这些里选一个：{' / '.join(IMAGE_ANALYSIS_CATEGORIES)}。"
+    "识别不出应用名或分类时，app/category 给空字符串，但 desc 必须写。"
+)
 
 # DPAPI 加解密（CryptProtectData / CryptUnprotectData）绑定当前 Windows 用户，
 # 密文换机器或换用户解不开——单人使用场景正好。
@@ -31,6 +56,34 @@ def decrypt_key(encrypted: str) -> str:
     return win32crypt.CryptUnprotectData(blob, None, None, None, 0)[1].decode("utf-8")
 
 
+def classify_ai_error(e: BaseException) -> str:
+    """把 AI 调用异常归类成用户能懂的一句话（需求 F2.4：失败需明确告知原因）。
+
+    认得出的给一句可操作的中文；认不出的一律回退原异常类型与信息——分类宁可少
+    不可错，排查线索不能丢（开发规范 1.3）。openai 延迟导入，与 AIClient 同理：
+    没装 openai 时本模块的 DPAPI 加解密也要可用。
+    """
+    fallback = f"{type(e).__name__}: {e}"
+    try:
+        import openai
+    except ImportError:
+        return fallback
+
+    raw = str(e).lower()
+    if any(k in raw for k in ("insufficient", "arrear", "余额", "欠费")):
+        # 各家"余额不足"的状态码不统一（429 配额、403 欠费都有），按报文关键词认
+        return "账户余额不足，请充值后等待下一轮自动重试"
+    if isinstance(e, openai.AuthenticationError):
+        return "API Key 无效或已失效，请在设置里重新配置"
+    if isinstance(e, openai.PermissionDeniedError):
+        return "无权访问该模型，请确认 Key 权限与模型名"
+    if isinstance(e, openai.RateLimitError):
+        return "请求被限流，请确认账户额度，等待下一轮自动重试"
+    if isinstance(e, openai.APIConnectionError):  # 超时 APITimeoutError 是它的子类
+        return "网络不通或无法访问 AI 服务，请检查网络与 Base URL"
+    return fallback
+
+
 class AIClient:
     """截图分析调用入口。"""
 
@@ -44,6 +97,8 @@ class AIClient:
         self._client = OpenAI(
             api_key=decrypt_key(ai["api_key_encrypted"]),
             base_url=ai["base_url"],
+            timeout=REQUEST_TIMEOUT_SECONDS,
+            max_retries=MAX_RETRIES,
         )
         self._model = ai["model"]
 
@@ -84,20 +139,24 @@ class AIClient:
         """
         return self._stream_text([{"role": "user", "content": prompt}], max_tokens=4096)
 
-    def analyze_image(self, base64_png: str) -> str:
-        """送截图给 AI，返回一句话文字描述。失败抛异常。"""
+    def analyze_image(self, base64_image: str, mime: str = "image/jpeg") -> str:
+        """送截图给 AI，返回结构化描述（JSON 原文）。失败抛异常。
+
+        返回的是**原文**，不在这里解析：模型可能夹带解释或代码块，
+        解析与容错统一交给 collector.parse_analysis，这一层只负责把请求发出去。
+
+        mime 默认 image/jpeg：采集侧送的是压缩后的 JPEG（见 collector.shrink_for_ai），
+        参数留出来是为了将来换回 PNG 或其它格式时不必改这里。
+        """
         return self._stream_text(
             [
                 {
                     "role": "user",
                     "content": [
-                        {
-                            "type": "text",
-                            "text": "描述这张屏幕截图中用户正在做什么，用一句话概括，不超过30字。",
-                        },
+                        {"type": "text", "text": IMAGE_ANALYSIS_PROMPT},
                         {
                             "type": "image_url",
-                            "image_url": {"url": f"data:image/png;base64,{base64_png}"},
+                            "image_url": {"url": f"data:{mime};base64,{base64_image}"},
                         },
                     ],
                 }

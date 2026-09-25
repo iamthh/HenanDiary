@@ -88,6 +88,43 @@ def test_daily_overwritten_flag_is_persisted(with_materials) -> None:
     assert "## 今日概览" in row["content_md"]
 
 
+# ---------------------------------------------------------------- 时间分布本地统计
+
+
+def test_daily_prompt_carries_local_distribution() -> None:
+    """时间分布改成按 category 逐条计数，不再让模型自己估。"""
+    db.init_db()
+    db.save_screenshot_analysis("2026-09-15T09:00:00", "写代码", app="PyCharm", category="编码")
+    db.save_screenshot_analysis("2026-09-15T09:05:00", "继续写", app="PyCharm", category="编码")
+    db.save_screenshot_analysis("2026-09-15T09:10:00", "回消息", app="飞书", category="沟通")
+    fake = _FakeAI()
+
+    generator.generate_daily_report("2026-09-15", ai=fake)
+
+    prompt = fake.prompts[0]
+    assert "编码：2 条（67%）" in prompt
+    assert "沟通：1 条（33%）" in prompt
+    assert "（编码） 写代码" in prompt  # 记录行带上分类，供聚类参考
+
+
+def test_daily_distribution_groups_legacy_rows_as_other() -> None:
+    """迁移前入库的老数据没有 category，统计时归「其他」，不能凭空消失。"""
+    db.init_db()
+    db.save_screenshot_analysis("2026-09-15T09:00:00", "老记录")
+    fake = _FakeAI()
+
+    generator.generate_daily_report("2026-09-15", ai=fake)
+
+    assert "其他：1 条（100%）" in fake.prompts[0]
+
+
+def test_distribution_lines_orders_by_count_desc() -> None:
+    lines = generator._distribution_lines([
+        {"category": "沟通"}, {"category": "编码"}, {"category": "编码"},
+    ])
+    assert lines.splitlines() == ["- 编码：2 条（67%）", "- 沟通：1 条（33%）"]
+
+
 # ---------------------------------------------------------------- 周报（M6）
 
 WEEKLY_OUTPUT = """## 本周概览
@@ -162,3 +199,126 @@ def test_weekly_empty_output_raises() -> None:
     _seed_week()
     with pytest.raises(ValueError):
         generator.generate_weekly_report("2026-09-14", ai=_FakeAI("   "))
+
+
+# ---------------------------------------------------------------- 结构化 JSON 的消费
+
+
+def test_weekly_prompt_includes_structured_digest() -> None:
+    """F4.2 存下来的结构化 JSON 要真被周报用上，而不是只写不读的死数据。"""
+    db.init_db()
+    db.save_daily_report(
+        "2026-09-14",
+        "## 今日概览\n第一天",
+        '{"overview": "写完采集模块", "distribution": [{"category": "编码", "percent": 70}]}',
+    )
+    fake = _FakeAI(WEEKLY_OUTPUT)
+
+    generator.generate_weekly_report("2026-09-14", ai=fake)
+
+    assert "概览：写完采集模块" in fake.prompts[0]
+    assert "时间分布：编码 70%" in fake.prompts[0]
+
+
+def test_weekly_prompt_omits_digest_line_when_json_is_empty() -> None:
+    _seed_week()  # 两份日报的 content_json 都是 "{}"
+    fake = _FakeAI(WEEKLY_OUTPUT)
+
+    generator.generate_weekly_report("2026-09-14", ai=fake)
+
+    assert "> " not in fake.prompts[0]
+    assert "第一天" in fake.prompts[0]
+
+
+def test_weekly_digest_tolerates_broken_json() -> None:
+    """content_json 可能是半截或非对象 JSON，周报生成不能因此崩掉。"""
+    db.init_db()
+    db.save_daily_report("2026-09-14", "## 今日概览\n第一天", "{不是合法 json")
+    fake = _FakeAI(WEEKLY_OUTPUT)
+
+    generator.generate_weekly_report("2026-09-14", ai=fake)
+
+    assert "第一天" in fake.prompts[0]  # 正文照常进 Prompt
+    assert "> " not in fake.prompts[0]  # 解析不了就不附摘要行，不打断生成
+
+
+@pytest.mark.parametrize("content_json,expected", [
+    ("{}", ""),
+    ("[]", ""),
+    ('{"overview": "只有概览"}', "概览：只有概览"),
+    (
+        '{"distribution": [{"category": "编码", "percent": 70},'
+        ' {"category": "沟通", "percent": 30}]}',
+        "时间分布：编码 70%、沟通 30%",
+    ),
+    ('{"overview": "两件都说了", "distribution": [{"category": "浏览", "percent": 20}]}',
+     "概览：两件都说了 ｜ 时间分布：浏览 20%"),
+])
+def test_daily_digest_rendering(content_json: str, expected: str) -> None:
+    assert generator._daily_digest(content_json) == expected
+
+
+# ---------------------------------------------------------------- 周报时间分布本地汇总
+
+
+def test_weekly_prompt_averages_daily_distributions() -> None:
+    """周报时间分布走本地统计：各天结构化分布按天平均，模型照抄不重估。"""
+    db.init_db()
+    db.save_daily_report(
+        "2026-09-14", "第一天",
+        '{"overview": "a", "distribution": [{"category": "编码", "percent": 60},'
+        ' {"category": "沟通", "percent": 40}]}',
+    )
+    db.save_daily_report(
+        "2026-09-16", "第三天",
+        '{"overview": "b", "distribution": [{"category": "编码", "percent": 20}]}',
+    )
+    fake = _FakeAI(WEEKLY_OUTPUT)
+
+    generator.generate_weekly_report("2026-09-14", ai=fake)
+
+    prompt = fake.prompts[0]
+    assert "本地统计" in prompt
+    assert "编码：40%" in prompt  # (60 + 20) / 2
+    assert "沟通：20%" in prompt  # 第二天没有该类按 0 计：(40 + 0) / 2
+
+
+def test_weekly_distribution_normalizes_wild_category() -> None:
+    """模型在日报 JSON 里吐的野生类别名要归「其他」，不能另立名目分裂统计。"""
+    db.init_db()
+    db.save_daily_report(
+        "2026-09-14", "第一天",
+        '{"distribution": [{"category": "摸鱼", "percent": 50}]}',
+    )
+    fake = _FakeAI(WEEKLY_OUTPUT)
+
+    generator.generate_weekly_report("2026-09-14", ai=fake)
+
+    assert "其他：50%" in fake.prompts[0]
+
+
+def test_weekly_falls_back_to_estimate_without_any_distribution() -> None:
+    _seed_week()  # 两份日报的 content_json 都是 "{}"，一天可用分布都没有
+    fake = _FakeAI(WEEKLY_OUTPUT)
+
+    generator.generate_weekly_report("2026-09-14", ai=fake)
+
+    prompt = fake.prompts[0]
+    assert "本地统计" not in prompt
+    assert "估算各类活动" in prompt
+
+
+def test_weekly_ignores_broken_json_when_averaging() -> None:
+    """坏 JSON 的日子不进平均，好日子照常算，正文照附，不打断生成。"""
+    db.init_db()
+    db.save_daily_report(
+        "2026-09-14", "第一天",
+        '{"distribution": [{"category": "编码", "percent": 60}]}',
+    )
+    db.save_daily_report("2026-09-16", "第三天", "{不是合法 json")
+    fake = _FakeAI(WEEKLY_OUTPUT)
+
+    generator.generate_weekly_report("2026-09-14", ai=fake)
+
+    assert "编码：60%" in fake.prompts[0]
+    assert "第一天" in fake.prompts[0] and "第三天" in fake.prompts[0]

@@ -24,7 +24,11 @@ WEB_DIR = Path(__file__).resolve().parent / "web"
 
 
 def _gen_report(argv: list[str]) -> int:
-    """手动生成日报。返回进程退出码。（与旧 CLI 行为一致，无 GUI。）"""
+    """手动生成日报。返回进程退出码。（无 GUI，供打包后命令行调用。）
+
+    生成结果只记日志、不打印正文：开发规范 1.3 禁止 print，且打包时 console=False，
+    打出去的正文本来就没人看得到。要看内容请开主窗口的「日报 / 周报」页。
+    """
     config.ensure_dirs()
     db.init_db()
     target = argv[0] if argv else _date.today().isoformat()
@@ -43,8 +47,8 @@ def _gen_report(argv: list[str]) -> int:
     if result.get("skipped"):
         log.info("未生成：%s", result["reason"])
         return 0
-    log.info("日报已生成 date=%s", target)
-    print(result["content_md"])
+    log.info("日报已生成 date=%s 正文=%d 字（在主窗口「日报 / 周报」页查看）",
+             target, len(result["content_md"]))
     return 0
 
 
@@ -145,7 +149,65 @@ def _startup_catch_up(api) -> None:
 
 # ------------------------------------------------------------------ 主窗口
 
+_WEBVIEW2_CLIENT_ID = "{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}"
+_WEBVIEW2_DOWNLOAD_URL = "https://go.microsoft.com/fwlink/p/?LinkId=2124703"
+
+
+def _find_webview2_runtime() -> str | None:
+    """查注册表里 WebView2 运行时的版本号，没装返回 None。
+
+    EdgeUpdate 在三处固定位置登记运行时（系统 64 位 / 系统 32 位视图 / 当前用户），
+    任一命中即可；pv 为 "0.0.0.0" 是 EdgeUpdate 的"未安装"占位值，不算数。
+    """
+    import winreg
+
+    for root, sub in (
+        (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients"),
+        (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Microsoft\EdgeUpdate\Clients"),
+        (winreg.HKEY_CURRENT_USER, r"Software\Microsoft\EdgeUpdate\Clients"),
+    ):
+        try:
+            with winreg.OpenKey(root, f"{sub}\\{_WEBVIEW2_CLIENT_ID}") as key:
+                version, _ = winreg.QueryValueEx(key, "pv")
+        except OSError:
+            continue
+        if version and version != "0.0.0.0":
+            return str(version)
+    return None
+
+
+def _ensure_webview2() -> bool:
+    """启动主窗口前确认 WebView2 运行时存在（M8 遗留：缺运行时窗口白屏，无从排查）。
+
+    窗口本体就是 WebView2，缺了它连引导页都出不来，所以必须在 create_window
+    之前用原生对话框拦住——这时托盘、窗口都还没建，Python 侧是唯一能说话的地方。
+    返回 False 表示缺运行时且用户已被告知，进程直接结束。
+    """
+    if _find_webview2_runtime() is not None:
+        return True
+
+    import ctypes
+
+    log.error("未检测到 WebView2 运行时，主窗口无法显示")
+    message = (
+        "未检测到 WebView2 运行时，HenanDiary 的界面无法显示。\n\n"
+        "请先安装 Microsoft Edge WebView2 运行时，然后重新启动本程序：\n"
+        f"{_WEBVIEW2_DOWNLOAD_URL}\n\n"
+        "现在打开官方下载页吗？"
+    )
+    clicked_yes = ctypes.windll.user32.MessageBoxW(
+        None, message, "HenanDiary", 0x04 | 0x30  # MB_YESNO | MB_ICONWARNING
+    ) == 6  # IDYES
+    if clicked_yes:
+        import os
+
+        os.startfile(_WEBVIEW2_DOWNLOAD_URL)
+    return False
+
+
 def _run_ui() -> int:
+    if not _ensure_webview2():
+        return 0
     import webview
 
     from ui.api import Api

@@ -163,7 +163,8 @@ async function loadTimeline(date) {
   for (const e of events) {
     const div = document.createElement('div');
     div.className = 'event';
-    div.innerHTML = `<div class="time">${esc(e.time)}</div><div class="desc">${esc(e.analysis)}</div>`;
+    const tag = e.category ? `<span class="tag">${esc(e.category)}</span>` : '';
+    div.innerHTML = `<div class="time">${esc(e.time)}</div><div class="desc">${tag}${esc(e.analysis)}</div>`;
     list.appendChild(div);
   }
   $('tl-empty').style.display = events.length ? 'none' : 'block';
@@ -171,7 +172,7 @@ async function loadTimeline(date) {
 
 /* ---------------------------------------------------------------- 报表 */
 
-let _kind = 'daily', _selected = null;
+let _kind = 'daily', _selected = null, _currentMd = '';
 $('kind-daily').addEventListener('click', () => switchKind('daily'));
 $('kind-weekly').addEventListener('click', () => switchKind('weekly'));
 function switchKind(kind) {
@@ -212,12 +213,19 @@ async function loadReports() {
 async function showReport(key) {
   const r = await call('get_report', _kind, key);
   if (!r || r.error) { if (r) toast(r.error); return; }
+  _currentMd = r.content_md || '';
   const title = _kind === 'daily' ? key : weekRange(key) + ' 周报';
   $('rp-body').innerHTML =
     `<div class="row" style="justify-content:flex-end">
        <span style="color:var(--dim);font-size:12px;margin-right:auto">${esc(title)}　·　生成于 ${esc(r.generated_at.replace('T',' '))}</span>
+       <button class="ghost" id="btn-copy">复制全文</button>
        <button class="ghost" id="btn-regen">重新生成</button></div>`
     + renderMarkdown(r.content_md);
+  $('btn-copy').addEventListener('click', async () => {
+    if (!_currentMd) { toast('还没有可复制的内容'); return; }
+    const r2 = await call('copy_text', _currentMd);
+    if (r2 && r2.ok) toast('已复制全文，可直接粘贴');
+  });
   $('btn-regen').addEventListener('click', () => generate(_kind, _kind === 'daily' ? '今日日报' : '本周周报'));
 }
 
