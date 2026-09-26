@@ -10,11 +10,13 @@ AI 失败不吞（开发规范 1.3）：记一笔 pending_report 欠账 + 回调
 
 调度层不 import PySide6、不 import mss：只依赖 config / db / generator / cleanup / ai（仅错误归类），
 界面通知通过 on_ai_failure 回调出去，采集器通过鸭子类型传进来（只要它有 run_once_safe）。
+M9 追加应用采样 job（id="app_usage"）：采样器同理走鸭子类型，那个模块只调 Win32 API、
+不拖 mss；工作时间门控放在 run_app_usage，采集器只管采一轮。
 """
 
 from __future__ import annotations
 
-from datetime import date as _date, timedelta
+from datetime import date as _date, datetime, timedelta
 from functools import partial
 from typing import Any, Callable
 
@@ -23,7 +25,7 @@ from ai.client import classify_ai_error
 from logger import get_logger
 from report.generator import generate_daily_report, generate_weekly_report
 from storage import db
-from storage.cleanup import cleanup_expired
+from storage.cleanup import cleanup_app_usage, cleanup_expired
 
 log = get_logger(__name__)
 
@@ -133,12 +135,32 @@ def run_weekly_report(
 
 
 def run_cleanup() -> int:
-    """每日清理过期素材，返回删除条数。失败只记日志，不影响其他任务。"""
+    """每日清理过期素材与应用明细，返回素材删除条数。失败只记日志，不影响其他任务。"""
+    deleted = 0
     try:
-        return cleanup_expired()
+        deleted = cleanup_expired()
     except Exception:
         log.exception("素材清理失败")
-        return 0
+    try:
+        cleanup_app_usage()
+    except Exception:
+        log.exception("应用明细清理失败")
+    return deleted
+
+
+def run_app_usage(collector: Any) -> None:
+    """应用采样调度入口：工作时间外直接跳过（与截图采集同一窗口口径，需求 F1.3）。
+
+    collector 只要求有 run_once_safe()（鸭子类型，同 build_scheduler 的采集器约定）。
+    独立成一个入口、不塞进采集循环：AI 挂了或截图失败了，应用时长也该照常记——
+    用户在用哪个程序是客观事实，不该跟着 AI 的成败一起丢。
+    """
+    hours = config.load_settings()["capture"]["work_hours"]
+    now = datetime.now()
+    if not (_parse_hhmm(hours["start"]) <= (now.hour, now.minute) < _parse_hhmm(hours["end"])):
+        log.debug("不在工作时间 %s-%s，跳过应用采样", hours["start"], hours["end"])
+        return
+    collector.run_once_safe()
 
 
 def retry_pending(on_ai_failure: OnFailure | None = None) -> dict[str, int]:
@@ -192,12 +214,15 @@ def catch_up_missed_reports(on_ai_failure: OnFailure | None = None) -> list[str]
 
 
 def build_scheduler(collector: Any, on_ai_failure: OnFailure | None = None) -> Any:
-    """建统一调度器：采集 interval + 日报 + 覆盖 + 周报 + 清理，返回 BackgroundScheduler。
+    """建统一调度器：采集/应用采样 interval + 日报 + 覆盖 + 周报 + 清理。
 
     collector 只要求有 run_once_safe()（鸭子类型，避免调度层依赖 mss）。
+    应用采样器就地创建（延迟导入，它同样不依赖 mss，只调 Win32 API）。
     调用方负责 shutdown。
     """
     from apscheduler.schedulers.background import BackgroundScheduler
+
+    from collector.app_usage import AppUsageCollector
 
     settings = config.load_settings()
     report_defaults = config.DEFAULT_SETTINGS["report"]
@@ -217,6 +242,13 @@ def build_scheduler(collector: Any, on_ai_failure: OnFailure | None = None) -> A
     scheduler.add_job(
         collector.run_once_safe, "interval", minutes=interval_min,
         misfire_grace_time=CAPTURE_MISFIRE_GRACE_SECONDS, id="capture",
+    )
+    # 应用采样与截图同间隔但各自独立（需求 F1.3）：截图或 AI 失败不该连坐应用时长
+    usage_collector = AppUsageCollector()
+    scheduler.add_job(
+        partial(run_app_usage, usage_collector),
+        "interval", minutes=interval_min,
+        misfire_grace_time=CAPTURE_MISFIRE_GRACE_SECONDS, id="app_usage",
     )
     scheduler.add_job(
         partial(run_daily_report, on_ai_failure=on_ai_failure),
@@ -240,7 +272,8 @@ def build_scheduler(collector: Any, on_ai_failure: OnFailure | None = None) -> A
     )
     scheduler.start()
     log.info(
-        "调度已启动：采集每 %s 分钟，日报 %02d:%02d，覆盖 %02d:%02d，周报 %s %02d:%02d，清理 %02d:%02d",
+        "调度已启动：采集与应用采样每 %s 分钟，日报 %02d:%02d，覆盖 %02d:%02d，"
+        "周报 %s %02d:%02d，清理 %02d:%02d",
         interval_min, hour, minute, ow_hour, ow_minute,
         WEEKLY_DAY_OF_WEEK, WEEKLY_HOUR, WEEKLY_MINUTE, CLEANUP_HOUR, CLEANUP_MINUTE,
     )

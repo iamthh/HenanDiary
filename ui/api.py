@@ -118,6 +118,7 @@ class Api:
         pending = db.get_pending_reports()
         return {
             "date": today,
+            "theme": settings["ui"]["theme"],
             "onboarding_done": settings["onboarding"]["done"],
             "capture": {
                 "enabled": capture["enabled"],
@@ -207,6 +208,34 @@ class Api:
         if self._tray_refresh:
             self._tray_refresh()
 
+    # ---------------------------------------------------------- 应用统计页
+
+    def get_app_usage(self, date: str) -> Any:
+        """某天的应用使用汇总（需求 F7.2）。只给结构化数据，画图归前端。"""
+
+        def run() -> dict[str, Any]:
+            rows = db.get_app_usage_summary(date)
+            total_s = sum(r["seconds"] for r in rows)
+            items = [
+                {
+                    "app": _friendly_app(r["app"]),
+                    "minutes": round(r["seconds"] / 60),
+                    "percent": round(r["seconds"] * 100 / total_s, 1) if total_s else 0.0,
+                    "samples": r["samples"],
+                }
+                for r in rows
+            ]
+            return {
+                "date": date,
+                "total_min": round(total_s / 60),
+                "samples": sum(r["samples"] for r in rows),
+                "items": items,
+            }
+
+        return self._guard(run)
+
+    # ---------------------------------------------------------- 剪贴板
+
     def copy_text(self, text: str) -> Any:
         """把文本放进系统剪贴板（报表页「复制全文」用）。
 
@@ -224,6 +253,7 @@ class Api:
                 win32clipboard.CloseClipboard()
             log.info("已复制文本到剪贴板（%d 字）", len(text))
             return {"ok": True}
+
         return self._guard(run)
 
     # ---------------------------------------------------------- 设置页
@@ -239,6 +269,7 @@ class Api:
                 "work_hours": s["capture"]["work_hours"],
                 "daily_time": s["report"]["daily_time"],
                 "overwrite_time": s["report"]["overwrite_time"],
+                "theme": s["ui"]["theme"],
             }
         return self._guard(run)
 
@@ -265,6 +296,20 @@ class Api:
             if self._on_settings_saved:
                 self._on_settings_saved()
             return {"ok": True}
+        return self._guard(run)
+
+    def set_theme(self, theme: str) -> Any:
+        """切换界面皮肤（需求 F8.1）。与 save_settings 分开的两个理由：
+
+        1. 皮肤是「选中即生效」，不该要求用户再点一次设置页的「保存设置」；
+        2. 它**不触发 on_settings_saved** —— 那个回调用来重排日报/周报的定时任务，
+           而换皮肤跟调度毫无关系，跟着空跑一次纯属浪费。
+        非法值由 config._validate 拦下，_guard 转成 {"error": ...}，坏值不会落盘。
+        """
+        def run() -> dict[str, Any]:
+            applied = config.update_settings({"ui": {"theme": theme}})["ui"]["theme"]
+            log.info("皮肤已切换 theme=%s", applied)
+            return {"ok": True, "theme": applied}
         return self._guard(run)
 
     def test_connection(self) -> Any:
@@ -380,6 +425,47 @@ class Api:
         if self._window:
             self._window.show()
             self._window.restore()
+
+
+# ---------------------------------------------------------- 应用名映射
+
+# 进程名 → 界面显示名（需求 F7.2）。只覆盖常见软件，未命中的原样显示——
+# 不做模糊匹配：猜错一个应用名比显示原始进程名更糟。
+_DISPLAY_NAMES = {
+    "Code": "VS Code",
+    "chrome": "Chrome",
+    "msedge": "Edge",
+    "firefox": "Firefox",
+    "WeChat": "微信",
+    "Weixin": "微信",
+    "DingTalk": "钉钉",
+    "Feishu": "飞书",
+    "Lark": "飞书",
+    "winword": "Word",
+    "excel": "Excel",
+    "powerpnt": "PowerPoint",
+    "wps": "WPS",
+    "et": "WPS 表格",
+    "wpp": "WPS 演示",
+    "notepad": "记事本",
+    "explorer": "文件资源管理器",
+    "WindowsTerminal": "Windows 终端",
+    "cmd": "命令提示符",
+    "powershell": "PowerShell",
+    "pwsh": "PowerShell",
+    "pycharm64": "PyCharm",
+    "idea64": "IntelliJ IDEA",
+    "obsidian": "Obsidian",
+    "Telegram": "Telegram",
+    "Discord": "Discord",
+    "Spotify": "Spotify",
+    "mstsc": "远程桌面",
+}
+
+
+def _friendly_app(process_name: str) -> str:
+    """进程名转显示名；没命中映射就原样返回。"""
+    return _DISPLAY_NAMES.get(process_name, process_name)
 
 
 def _dumps(obj: Any) -> str:

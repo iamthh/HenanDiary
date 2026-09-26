@@ -75,7 +75,7 @@ function go(page) {
   document.querySelectorAll('nav button').forEach(b => b.classList.toggle('active', b.dataset.p === page));
   document.querySelectorAll('.page').forEach(p => p.classList.remove('show'));
   $('p-' + page).classList.add('show');
-  if (page === 'overview') loadOverview();
+  if (page === 'overview') loadOverview().then(() => loadOverviewUsage());
   if (page === 'timeline') loadTimelineDates();
   if (page === 'report') loadReports();
   if (page === 'settings') loadSettingsForm();
@@ -84,9 +84,13 @@ document.querySelectorAll('nav button').forEach(b => b.addEventListener('click',
 
 /* ---------------------------------------------------------------- 总览 */
 
+/* 后端认定的「今天」。总览页里涉及日期的取数都用它，避免前端各算一次（跨零点会错位）。 */
+let _today = null;
+
 async function loadOverview() {
   const s = await call('get_state');
   if (!s || s.error) return;
+  _today = s.date;
   $('ov-date').textContent = `${s.date} · 工作时间 ${s.capture.work_hours.start}–${s.capture.work_hours.end}`;
   $('ov-count').textContent = s.capture.count_today;
   $('ov-next').textContent = s.capture.enabled && s.capture.next_ts
@@ -135,6 +139,45 @@ async function generate(kind, label) {
     else { toast(`${label}已生成`); loadOverview(); }
   }
 }
+
+/* 今日应用统计摘要 —— M9 的数据放进总览页，图形可在饼图/柱状图间切换。
+   刻意不挂到 boot() 的 10 秒轮询上：应用采样是 5/10 分钟粒度，跟着轮询重绘只会闪。 */
+
+let _ovUsage = null;        // 最近一次取数结果，切换图形时复用，不必重新请求
+let _ovUsageMode = 'pie';   // 'pie' | 'bar'
+
+async function loadOverviewUsage() {
+  if (!_today) return;
+  const r = await call('get_app_usage', _today);
+  const card = $('ov-usage');
+  if (!r || r.error) { card.style.display = 'none'; return; }
+  card.style.display = 'block';
+  _ovUsage = r;
+  renderOverviewUsage();
+}
+
+function renderOverviewUsage() {
+  const r = _ovUsage;
+  if (!r) return;
+  const body = $('ov-usage-body');
+  if (!r.items.length) {
+    body.innerHTML = '<p style="color:var(--dim);font-size:13px">今天还没有应用使用记录，'
+      + '工作时间内开始采集后这里会出现统计。</p>';
+    return;
+  }
+  const top = topN(r.items, 5);
+  body.innerHTML =
+    `<div style="color:var(--dim);font-size:12px;margin-bottom:12px">共 ${fmtDur(r.total_min)}`
+    + ` · 用得最多 ${esc(r.items[0].app)}（${fmtDur(r.items[0].minutes)}）· ${r.samples} 次采样</div>`
+    + (_ovUsageMode === 'bar' ? barHtml(top) : pieHtml(top))
+    + '<div class="usage-note">按采集间隔采样估算，非精确计时；挂机与空闲不计入。</div>';
+}
+
+$('ov-usage-mode').querySelectorAll('button').forEach(b => b.addEventListener('click', () => {
+  _ovUsageMode = b.dataset.v;
+  $('ov-usage-mode').querySelectorAll('button').forEach(x => x.classList.toggle('on', x === b));
+  renderOverviewUsage();
+}));
 
 /* ---------------------------------------------------------------- 时间线 */
 
@@ -228,6 +271,106 @@ async function showReport(key) {
   $('btn-regen').addEventListener('click', () => generate(_kind, _kind === 'daily' ? '今日日报' : '本周周报'));
 }
 
+/* ---------------------------------------------------------------- 应用统计图表工具（M9） */
+
+/* 图表手写：项目约束是零构建、零前端框架，不引 ECharts/Chart.js。
+   柱状图（div 高度百分比）与饼图（内联 SVG 扇形）都不需要额外依赖。 */
+
+function fmtDur(min) {
+  const h = Math.floor(min / 60), m = min % 60;
+  return h ? `${h}h${String(m).padStart(2, '0')}m` : `${m}m`;
+}
+
+/* 超出 n 项就合并成「其他」——条目太多两种图都读不清 */
+function topN(items, n) {
+  if (items.length <= n) return items.slice();
+  const rest = items.slice(n);
+  return items.slice(0, n).concat([{
+    app: '其他',
+    minutes: rest.reduce((s, i) => s + i.minutes, 0),
+    percent: Math.round(rest.reduce((s, i) => s + i.percent, 0) * 10) / 10,
+  }]);
+}
+
+/* 竖向柱状图：div 高度百分比，同样不引图表库。
+   配色与饼图共用 PIE_COLORS，按序号取色——同一应用在两种图里颜色一致；
+   序号即后端返回的时长降序，所以柱子从左往右由高到低依次排开。 */
+function barHtml(items) {
+  const max = Math.max(...items.map(i => i.minutes), 1);
+  return '<div class="bar-chart">' + items.map((i, idx) => {
+    const color = PIE_COLORS[idx % PIE_COLORS.length];
+    return `<div class="bar-col" title="${esc(i.app)}：${fmtDur(i.minutes)} · ${i.percent}%">
+      <div class="bar-value">${fmtDur(i.minutes)}</div>
+      <div class="bar-track"><span class="bar-fill" style="height:${(i.minutes / max * 100).toFixed(1)}%;background:${color}"></span></div>
+      <div class="bar-name">${esc(i.app)}</div>
+    </div>`;
+  }).join('') + '</div>';
+}
+
+/* 图表配色：手写内联 SVG 扇形 + div 柱子，不引图表库（项目约束：零构建、零前端框架）。
+   明/暗两套按皮肤取——同一套色换到浅色底上对比度不够（浅金 #d9c48a 尤其明显）。
+   饼图与柱状图共用同一套、按序号取色，所以同一应用在两种图里颜色一致。 */
+const THEME_COLORS = {
+  dark: ['#d97a4a', '#e8a97e', '#8a4d30', '#6fbf73', '#d9c48a', '#6b5f52'],
+  light: ['#b8491a', '#d97a4a', '#8f3a13', '#2e7d33', '#ba7517', '#7d7468'],
+};
+
+/* 当前皮肤对应的那套色。applyTheme() 切皮肤时换掉它，图表函数因此一行都不用改。
+   初始值必须问 pieColors() 而不是写死 dark：index.html 的首帧脚本可能已经把
+   data-theme 定成 light 了，而 applyTheme() 遇到"值没变"会直接返回——
+   那样这个常量就会和真实皮肤错开，浅底上画出深色图表。 */
+let PIE_COLORS = pieColors();
+
+function pieColors() {
+  return document.documentElement.dataset.theme === 'light' ? THEME_COLORS.light : THEME_COLORS.dark;
+}
+
+function pieHtml(items) {
+  const total = items.reduce((s, i) => s + i.minutes, 0) || 1;
+  const CX = 75, CY = 75, R = 64;
+  let angle = -Math.PI / 2;   // 从 12 点方向开始顺时针
+  let paths = '';
+  items.forEach((i, idx) => {
+    const from = angle;
+    const to = angle + i.minutes / total * Math.PI * 2;
+    angle = to;
+    const color = PIE_COLORS[idx % PIE_COLORS.length];
+    if (items.length === 1) {   // 整圆时起止点重合，弧线会退化，直接画圆
+      paths += `<circle cx="${CX}" cy="${CY}" r="${R}" fill="${color}"/>`;
+      return;
+    }
+    const x1 = CX + R * Math.cos(from), y1 = CY + R * Math.sin(from);
+    const x2 = CX + R * Math.cos(to), y2 = CY + R * Math.sin(to);
+    const large = (to - from) > Math.PI ? 1 : 0;
+    paths += `<path d="M${CX},${CY} L${x1.toFixed(2)},${y1.toFixed(2)}`
+      + ` A${R},${R} 0 ${large} 1 ${x2.toFixed(2)},${y2.toFixed(2)} Z"`
+      + ` fill="${color}" stroke="var(--bg)" stroke-width="0.5"/>`;
+  });
+  const legend = items.map((i, idx) =>
+    `<div class="legend-row">
+       <span class="swatch" style="background:${PIE_COLORS[idx % PIE_COLORS.length]}"></span>
+       <span class="nm">${esc(i.app)}</span><span class="pct">${i.percent}%</span>
+     </div>`).join('');
+  return `<div class="pie-wrap">
+    <svg viewBox="0 0 150 150" width="150" height="150" role="img" aria-label="应用使用占比饼图">${paths}</svg>
+    <div class="legend">${legend}</div>
+  </div>`;
+}
+
+/* ---------------------------------------------------------------- 外观皮肤 */
+
+/* 切皮肤 = 换 <html data-theme>，CSS 变量取值跟着走；图表配色是 JS 常量，得手动重取。
+   应用统计卡只重渲染、不重新取数（沿用 _ovUsage 缓存，和切换饼图/柱状图同一个约定）。 */
+function applyTheme(theme) {
+  if (document.documentElement.dataset.theme === theme) return;
+  document.documentElement.dataset.theme = theme;
+  PIE_COLORS = pieColors();
+  try {
+    localStorage.setItem('hd-theme', theme);   // 只给下次启动的首帧用（见 index.html 内联脚本）
+  } catch (e) { /* 写不进去就退化为启动闪一帧，不影响本次切换 */ }
+  if (_ovUsage) renderOverviewUsage();
+}
+
 /* ---------------------------------------------------------------- 设置 */
 
 let _interval = 5;
@@ -245,10 +388,21 @@ async function loadSettingsForm() {
   _interval = s.screenshot_interval_min;
   $('st-interval').querySelectorAll('button').forEach(b =>
     b.classList.toggle('on', Number(b.dataset.v) === _interval));
+  $('st-theme').querySelectorAll('button').forEach(b =>
+    b.classList.toggle('on', b.dataset.v === s.theme));
 }
 $('st-interval').querySelectorAll('button').forEach(b => b.addEventListener('click', () => {
   _interval = Number(b.dataset.v);
   $('st-interval').querySelectorAll('button').forEach(x => x.classList.toggle('on', x === b));
+}));
+/* 皮肤是「选中即生效」：先把值落盘，成功了才换界面，避免出现「看着变了其实没存」 */
+$('st-theme').querySelectorAll('button').forEach(b => b.addEventListener('click', async () => {
+  const theme = b.dataset.v;
+  if (document.documentElement.dataset.theme === theme) return;
+  const r = await call('set_theme', theme);
+  if (!r || r.error) return;
+  applyTheme(theme);
+  $('st-theme').querySelectorAll('button').forEach(x => x.classList.toggle('on', x === b));
 }));
 
 $('btn-save').addEventListener('click', async () => {
@@ -334,6 +488,7 @@ async function boot() {
   if (window._booted) return;
   window._booted = true;
   const s = await call('get_state');
+  if (s && !s.error) applyTheme(s.theme);  // 后端是唯一真相，覆盖 index.html 的首帧提示
   if (s && !s.error && s.onboarding_done) {
     $('sidebar').style.display = 'flex';
     go('overview');

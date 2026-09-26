@@ -118,3 +118,43 @@ def test_bad_time_is_not_persisted() -> None:
         config.update_settings({"report": {"daily_time": "not-a-time"}})
 
     assert config.load_settings()["report"]["daily_time"] == "21:30"
+
+
+# ---------------------------------------------------------------- 界面皮肤（F8.1）
+
+
+def test_default_theme_is_dark() -> None:
+    """默认沿用原本的暗色，老用户升级后界面不该变。"""
+    assert config.ALLOWED_THEMES == ("dark", "light")
+    assert config.load_settings()["ui"]["theme"] == "dark"
+
+
+def test_missing_ui_key_is_filled_from_defaults() -> None:
+    """老的 settings.json 没有 ui 键时靠 deep_merge 补齐，不需要做数据迁移。"""
+    path = config.get_config_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({"capture": {"screenshot_interval_min": 10}}), encoding="utf-8")
+
+    settings = config.load_settings()
+
+    assert settings["ui"]["theme"] == "dark"
+    assert settings["capture"]["screenshot_interval_min"] == 10
+
+
+@pytest.mark.parametrize("theme", ["dark", "light"])
+def test_allowed_themes_are_accepted(theme: str) -> None:
+    assert config.update_settings({"ui": {"theme": theme}})["ui"]["theme"] == theme
+
+
+def test_update_settings_rejects_unknown_theme() -> None:
+    with pytest.raises(ValueError):
+        config.update_settings({"ui": {"theme": "solarized"}})
+
+
+def test_bad_theme_is_not_persisted() -> None:
+    """同坏时间：拦下来之后原文件必须还是上次的合法值。"""
+    config.update_settings({"ui": {"theme": "light"}})
+    with pytest.raises(ValueError):
+        config.update_settings({"ui": {"theme": "solarized"}})
+
+    assert config.load_settings()["ui"]["theme"] == "light"
