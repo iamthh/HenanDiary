@@ -118,6 +118,7 @@ class Api:
         pending = db.get_pending_reports()
         return {
             "date": today,
+            "theme": settings["ui"]["theme"],
             "onboarding_done": settings["onboarding"]["done"],
             "capture": {
                 "enabled": capture["enabled"],
@@ -268,6 +269,7 @@ class Api:
                 "work_hours": s["capture"]["work_hours"],
                 "daily_time": s["report"]["daily_time"],
                 "overwrite_time": s["report"]["overwrite_time"],
+                "theme": s["ui"]["theme"],
             }
         return self._guard(run)
 
@@ -294,6 +296,20 @@ class Api:
             if self._on_settings_saved:
                 self._on_settings_saved()
             return {"ok": True}
+        return self._guard(run)
+
+    def set_theme(self, theme: str) -> Any:
+        """切换界面皮肤（需求 F8.1）。与 save_settings 分开的两个理由：
+
+        1. 皮肤是「选中即生效」，不该要求用户再点一次设置页的「保存设置」；
+        2. 它**不触发 on_settings_saved** —— 那个回调用来重排日报/周报的定时任务，
+           而换皮肤跟调度毫无关系，跟着空跑一次纯属浪费。
+        非法值由 config._validate 拦下，_guard 转成 {"error": ...}，坏值不会落盘。
+        """
+        def run() -> dict[str, Any]:
+            applied = config.update_settings({"ui": {"theme": theme}})["ui"]["theme"]
+            log.info("皮肤已切换 theme=%s", applied)
+            return {"ok": True, "theme": applied}
         return self._guard(run)
 
     def test_connection(self) -> Any:

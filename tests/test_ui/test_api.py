@@ -262,3 +262,27 @@ def test_copy_text_closes_clipboard_on_error(api, monkeypatch) -> None:
     result = api.copy_text("x")
     assert "error" in result
     assert closed == [True]  # 异常时也必须关剪贴板，否则全局剪贴板被锁死
+
+
+# ---------------------------------------------------------------- 界面皮肤（F8.1）
+
+def test_get_settings_and_state_return_theme(api) -> None:
+    """总览首帧就要用它对齐皮肤，所以 get_state 也带一份，省掉一次额外往返。"""
+    assert api.get_settings()["theme"] == "dark"
+    assert api.get_state()["theme"] == "dark"
+
+
+def test_set_theme_persists_without_rescheduling(api) -> None:
+    hits = []
+    api.attach(on_settings_saved=lambda: hits.append(1))
+
+    assert api.set_theme("light") == {"ok": True, "theme": "light"}
+    assert config.load_settings()["ui"]["theme"] == "light"
+    assert api.get_settings()["theme"] == "light"
+    assert hits == []  # 换皮肤与日报/周报调度无关，不该触发重排
+
+
+def test_set_theme_rejects_unknown_value(api) -> None:
+    result = api.set_theme("solarized")
+    assert "error" in result  # _guard 捕获 ValueError，不抛穿
+    assert config.load_settings()["ui"]["theme"] == "dark"  # 坏值不落盘

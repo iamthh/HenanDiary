@@ -20,6 +20,10 @@ APP_NAME = "HenanDiary"
 ALLOWED_INTERVAL_MIN = (2, 5, 10)
 DEFAULT_SCREENSHOT_INTERVAL_MIN = 5
 
+# 需求文档 F8.1：界面皮肤只有明/暗两档，默认沿用原本的暗色（老用户升级后界面不变）
+ALLOWED_THEMES = ("dark", "light")
+DEFAULT_THEME = "dark"
+
 DEFAULT_SETTINGS: dict[str, Any] = {
     "ai": {
         "api_key_encrypted": "",
@@ -39,6 +43,9 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "storage": {
         "raw_retention_days": 3,
         "usage_retention_days": 90,   # 应用使用明细保留期（需求 D20 / F7.1）
+    },
+    "ui": {
+        "theme": DEFAULT_THEME,       # 界面皮肤（F8.1）：dark | light
     },
     "onboarding": {
         "done": False,
@@ -168,6 +175,10 @@ def _validate(settings: dict[str, Any]) -> None:
 
     parse_hhmm(settings["report"]["daily_time"], "report.daily_time")
     parse_hhmm(settings["report"]["overwrite_time"], "report.overwrite_time")
+
+    theme = settings["ui"]["theme"]
+    if theme not in ALLOWED_THEMES:
+        raise ValueError(f"皮肤只允许 {'/'.join(ALLOWED_THEMES)}，收到: {theme!r}")
 
 
 def _deep_merge(base: dict[str, Any], patch: dict[str, Any]) -> dict[str, Any]:

@@ -276,8 +276,6 @@ async function showReport(key) {
 /* 图表手写：项目约束是零构建、零前端框架，不引 ECharts/Chart.js。
    柱状图（div 高度百分比）与饼图（内联 SVG 扇形）都不需要额外依赖。 */
 
-const PIE_COLORS = ['#d97a4a', '#e8a97e', '#8a4d30', '#6fbf73', '#d9c48a', '#6b5f52'];
-
 function fmtDur(min) {
   const h = Math.floor(min / 60), m = min % 60;
   return h ? `${h}h${String(m).padStart(2, '0')}m` : `${m}m`;
@@ -307,6 +305,24 @@ function barHtml(items) {
       <div class="bar-name">${esc(i.app)}</div>
     </div>`;
   }).join('') + '</div>';
+}
+
+/* 图表配色：手写内联 SVG 扇形 + div 柱子，不引图表库（项目约束：零构建、零前端框架）。
+   明/暗两套按皮肤取——同一套色换到浅色底上对比度不够（浅金 #d9c48a 尤其明显）。
+   饼图与柱状图共用同一套、按序号取色，所以同一应用在两种图里颜色一致。 */
+const THEME_COLORS = {
+  dark: ['#d97a4a', '#e8a97e', '#8a4d30', '#6fbf73', '#d9c48a', '#6b5f52'],
+  light: ['#b8491a', '#d97a4a', '#8f3a13', '#2e7d33', '#ba7517', '#7d7468'],
+};
+
+/* 当前皮肤对应的那套色。applyTheme() 切皮肤时换掉它，图表函数因此一行都不用改。
+   初始值必须问 pieColors() 而不是写死 dark：index.html 的首帧脚本可能已经把
+   data-theme 定成 light 了，而 applyTheme() 遇到"值没变"会直接返回——
+   那样这个常量就会和真实皮肤错开，浅底上画出深色图表。 */
+let PIE_COLORS = pieColors();
+
+function pieColors() {
+  return document.documentElement.dataset.theme === 'light' ? THEME_COLORS.light : THEME_COLORS.dark;
 }
 
 function pieHtml(items) {
@@ -341,6 +357,20 @@ function pieHtml(items) {
   </div>`;
 }
 
+/* ---------------------------------------------------------------- 外观皮肤 */
+
+/* 切皮肤 = 换 <html data-theme>，CSS 变量取值跟着走；图表配色是 JS 常量，得手动重取。
+   应用统计卡只重渲染、不重新取数（沿用 _ovUsage 缓存，和切换饼图/柱状图同一个约定）。 */
+function applyTheme(theme) {
+  if (document.documentElement.dataset.theme === theme) return;
+  document.documentElement.dataset.theme = theme;
+  PIE_COLORS = pieColors();
+  try {
+    localStorage.setItem('hd-theme', theme);   // 只给下次启动的首帧用（见 index.html 内联脚本）
+  } catch (e) { /* 写不进去就退化为启动闪一帧，不影响本次切换 */ }
+  if (_ovUsage) renderOverviewUsage();
+}
+
 /* ---------------------------------------------------------------- 设置 */
 
 let _interval = 5;
@@ -358,11 +388,23 @@ async function loadSettingsForm() {
   _interval = s.screenshot_interval_min;
   $('st-interval').querySelectorAll('button').forEach(b =>
     b.classList.toggle('on', Number(b.dataset.v) === _interval));
+  $('st-theme').querySelectorAll('button').forEach(b =>
+    b.classList.toggle('on', b.dataset.v === s.theme));
 }
 $('st-interval').querySelectorAll('button').forEach(b => b.addEventListener('click', () => {
   _interval = Number(b.dataset.v);
   $('st-interval').querySelectorAll('button').forEach(x => x.classList.toggle('on', x === b));
 }));
+/* 皮肤是「选中即生效」：先把值落盘，成功了才换界面，避免出现「看着变了其实没存」 */
+$('st-theme').querySelectorAll('button').forEach(b => b.addEventListener('click', async () => {
+  const theme = b.dataset.v;
+  if (document.documentElement.dataset.theme === theme) return;
+  const r = await call('set_theme', theme);
+  if (!r || r.error) return;
+  applyTheme(theme);
+  $('st-theme').querySelectorAll('button').forEach(x => x.classList.toggle('on', x === b));
+}));
+
 $('btn-save').addEventListener('click', async () => {
   const r = await call('save_settings', collectSettings());
   if (r && !r.error) toast('设置已保存');
@@ -446,6 +488,7 @@ async function boot() {
   if (window._booted) return;
   window._booted = true;
   const s = await call('get_state');
+  if (s && !s.error) applyTheme(s.theme);  // 后端是唯一真相，覆盖 index.html 的首帧提示
   if (s && !s.error && s.onboarding_done) {
     $('sidebar').style.display = 'flex';
     go('overview');

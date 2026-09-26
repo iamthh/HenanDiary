@@ -3,6 +3,15 @@
 <head>
 <meta charset="UTF-8">
 <title>HenanDiary</title>
+<script>
+/* 首帧防闪烁：皮肤真值要等后端 get_state() 才回来，先拿上次的缓存值把 <html data-theme>
+   定下来，避免明亮皮肤的用户先看到一帧暗色。这只是提示位、不是配置来源——
+   boot() 拿到后端值后会覆盖它，真相始终在 settings.json。读不到就按默认暗色渲染。 */
+try {
+  var _t = localStorage.getItem('hd-theme');
+  if (_t === 'light' || _t === 'dark') document.documentElement.dataset.theme = _t;
+} catch (e) { /* 隐私模式等场景下不可读，退化为启动闪一帧，不影响功能 */ }
+</script>
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -117,6 +126,15 @@
       <label style="margin:0">日报时间</label><input type="text" id="st-dt" value="22:00" style="width:90px" placeholder="HH:MM">
       <label style="margin:0 0 0 24px">覆盖时间</label><input type="text" id="st-ot" value="00:30" style="width:90px" placeholder="HH:MM">
     </div></div>
+  </div>
+  <div class="card">
+    <b>外观</b>
+    <div class="field" style="margin-top:14px"><label>皮肤</label>
+      <div class="seg" id="st-theme">
+        <button data-v="dark">暗色</button><button data-v="light">明亮</button>
+      </div>
+      <p style="color:var(--dim);font-size:12px;margin-top:8px">切换后立即生效并自动保存，不需要点下面的「保存设置」。</p>
+    </div>
   </div>
   <div class="card danger-zone">
     <h3>数据管理</h3>
