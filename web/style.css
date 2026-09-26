@@ -6,13 +6,16 @@
   --bad-border:#4a2525; --shadow:rgba(0,0,0,.4);
 }
 /* 明亮皮肤（需求 F8.1）：只换取值，变量名与暗色完全一致，所以布局规则一行都不用改。
-   --accent / --accent-dim 比暗色更深：它们要当按钮底色，白字压上去得满足 4.5:1 对比度；
-   它们也当输入框聚焦边框，深色在浅底上才看得出来。 */
+   主色调是冷蓝（2026-09-26，需求 v0.8）：中性色也一起转冷，否则暖米底配蓝点会打架。
+   --accent / --accent-dim 比暗色更深：它们要当按钮底色，白字压上去得满足 4.5:1 对比度
+   （#1d5fcc 压白字 5.90:1；淡蓝如 #4a90d9 只有 3.34:1，只能当底色不能当按钮填充）；
+   它们也当输入框聚焦边框，深色在浅底上才看得出来。
+   --ok / --bad 是语义色（正常/异常、采集运行中），不跟着主色调走，两档取值相同。 */
 html[data-theme="light"]{
-  --bg:#f7f4f0; --panel:#fff; --panel2:#f0ebe4; --border:#e0d8cd;
-  --text:#2b2622; --dim:#7d7468; --accent:#b8491a; --accent-dim:#8f3a13;
+  --bg:#f6f8fb; --panel:#fff; --panel2:#eef2f7; --border:#dbe3ec;
+  --text:#1f2733; --dim:#6b7683; --accent:#1d5fcc; --accent-dim:#16489c;
   --ok:#2e7d33; --bad:#c0392b;
-  --text-soft:#4a423a; --ok-bg:#e6f4e7; --accent-bg:#fbeee2; --bad-bg:#fbe9e7;
+  --text-soft:#3f4a57; --ok-bg:#e6f4e7; --accent-bg:#e6effc; --bad-bg:#fbe9e7;
   --bad-border:#e8c4c0; --shadow:rgba(0,0,0,.12);
 }
 *{box-sizing:border-box;margin:0;padding:0;font-family:"Microsoft YaHei UI","Segoe UI",sans-serif}
