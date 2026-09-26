@@ -23,7 +23,6 @@
     <button data-p="overview" class="active">☀ 今日总览</button>
     <button data-p="timeline">⧗ 时间线</button>
     <button data-p="report">✎ 日报 / 周报</button>
-    <button data-p="usage">◔ 应用统计</button>
     <button data-p="settings">⚙ 设置</button>
   </nav>
   <div class="side-bottom" id="side-status">…</div>
@@ -53,6 +52,15 @@
     <b style="color:var(--bad)">待重试任务</b>
     <div id="ov-pending-list" style="font-size:13px;color:var(--dim);margin-top:8px"></div>
   </div>
+  <div class="card" id="ov-usage" style="display:none">
+    <div class="row" style="justify-content:space-between">
+      <b>应用统计</b>
+      <div class="seg" id="ov-usage-mode">
+        <button data-v="pie" class="on">饼图</button><button data-v="bar">柱状图</button>
+      </div>
+    </div>
+    <div id="ov-usage-body" style="margin-top:14px"></div>
+  </div>
 </section>
 
 <!-- 时间线 -->
@@ -79,26 +87,6 @@
     </div>
     <div class="card report-body" id="rp-body"><span style="color:var(--dim)">← 选一份报表看看</span></div>
   </div>
-</section>
-
-<!-- 应用统计 -->
-<section class="page" id="p-usage">
-  <h1>应用统计</h1>
-  <div class="sub" id="us-sub"></div>
-  <div class="usage-head">
-    <label style="color:var(--dim);font-size:13px">日期</label>
-    <input type="date" id="us-date" style="width:150px">
-    <span style="color:var(--dim);font-size:13px;margin-left:10px">视图</span>
-    <div class="seg" id="us-mode">
-      <button data-v="bar" class="on">条形图</button><button data-v="pie">饼图</button>
-    </div>
-  </div>
-  <div class="card" id="us-card">
-    <div class="grid" id="us-stats"></div>
-    <div id="us-chart" style="margin-top:20px"></div>
-    <div class="usage-note" id="us-note"></div>
-  </div>
-  <p id="us-empty" style="display:none;color:var(--dim);font-size:13px">这一天没有应用使用记录。</p>
 </section>
 
 <!-- 设置 -->

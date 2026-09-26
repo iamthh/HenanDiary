@@ -75,19 +75,22 @@ function go(page) {
   document.querySelectorAll('nav button').forEach(b => b.classList.toggle('active', b.dataset.p === page));
   document.querySelectorAll('.page').forEach(p => p.classList.remove('show'));
   $('p-' + page).classList.add('show');
-  if (page === 'overview') loadOverview();
+  if (page === 'overview') loadOverview().then(() => loadOverviewUsage());
   if (page === 'timeline') loadTimelineDates();
   if (page === 'report') loadReports();
-  if (page === 'usage') loadUsage();
   if (page === 'settings') loadSettingsForm();
 }
 document.querySelectorAll('nav button').forEach(b => b.addEventListener('click', () => go(b.dataset.p)));
 
 /* ---------------------------------------------------------------- 总览 */
 
+/* 后端认定的「今天」。总览页里涉及日期的取数都用它，避免前端各算一次（跨零点会错位）。 */
+let _today = null;
+
 async function loadOverview() {
   const s = await call('get_state');
   if (!s || s.error) return;
+  _today = s.date;
   $('ov-date').textContent = `${s.date} · 工作时间 ${s.capture.work_hours.start}–${s.capture.work_hours.end}`;
   $('ov-count').textContent = s.capture.count_today;
   $('ov-next').textContent = s.capture.enabled && s.capture.next_ts
@@ -136,6 +139,45 @@ async function generate(kind, label) {
     else { toast(`${label}已生成`); loadOverview(); }
   }
 }
+
+/* 今日应用统计摘要 —— M9 的数据放进总览页，图形可在饼图/柱状图间切换。
+   刻意不挂到 boot() 的 10 秒轮询上：应用采样是 5/10 分钟粒度，跟着轮询重绘只会闪。 */
+
+let _ovUsage = null;        // 最近一次取数结果，切换图形时复用，不必重新请求
+let _ovUsageMode = 'pie';   // 'pie' | 'bar'
+
+async function loadOverviewUsage() {
+  if (!_today) return;
+  const r = await call('get_app_usage', _today);
+  const card = $('ov-usage');
+  if (!r || r.error) { card.style.display = 'none'; return; }
+  card.style.display = 'block';
+  _ovUsage = r;
+  renderOverviewUsage();
+}
+
+function renderOverviewUsage() {
+  const r = _ovUsage;
+  if (!r) return;
+  const body = $('ov-usage-body');
+  if (!r.items.length) {
+    body.innerHTML = '<p style="color:var(--dim);font-size:13px">今天还没有应用使用记录，'
+      + '工作时间内开始采集后这里会出现统计。</p>';
+    return;
+  }
+  const top = topN(r.items, 5);
+  body.innerHTML =
+    `<div style="color:var(--dim);font-size:12px;margin-bottom:12px">共 ${fmtDur(r.total_min)}`
+    + ` · 用得最多 ${esc(r.items[0].app)}（${fmtDur(r.items[0].minutes)}）· ${r.samples} 次采样</div>`
+    + (_ovUsageMode === 'bar' ? barHtml(top) : pieHtml(top))
+    + '<div class="usage-note">按采集间隔采样估算，非精确计时；挂机与空闲不计入。</div>';
+}
+
+$('ov-usage-mode').querySelectorAll('button').forEach(b => b.addEventListener('click', () => {
+  _ovUsageMode = b.dataset.v;
+  $('ov-usage-mode').querySelectorAll('button').forEach(x => x.classList.toggle('on', x === b));
+  renderOverviewUsage();
+}));
 
 /* ---------------------------------------------------------------- 时间线 */
 
@@ -229,30 +271,19 @@ async function showReport(key) {
   $('btn-regen').addEventListener('click', () => generate(_kind, _kind === 'daily' ? '今日日报' : '本周周报'));
 }
 
-/* ---------------------------------------------------------------- 应用统计（M9） */
+/* ---------------------------------------------------------------- 应用统计图表工具（M9） */
 
-/* 图表全部手写：项目约束是零构建、零前端框架，不引 ECharts/Chart.js。
-   条形图用 div 宽度百分比，饼图用内联 SVG 扇形路径，都不需要额外依赖。 */
+/* 图表手写：项目约束是零构建、零前端框架，不引 ECharts/Chart.js。
+   柱状图（div 高度百分比）与饼图（内联 SVG 扇形）都不需要额外依赖。 */
 
 const PIE_COLORS = ['#d97a4a', '#e8a97e', '#8a4d30', '#6fbf73', '#d9c48a', '#6b5f52'];
-
-let _usageMode = 'bar';
-let _usage = null;
-
-$('us-mode').querySelectorAll('button').forEach(b => b.addEventListener('click', () => {
-  _usageMode = b.dataset.v;
-  $('us-mode').querySelectorAll('button').forEach(x => x.classList.toggle('on', x === b));
-  renderUsageChart();
-}));
-
-$('us-date').addEventListener('change', () => loadUsage($('us-date').value));
 
 function fmtDur(min) {
   const h = Math.floor(min / 60), m = min % 60;
   return h ? `${h}h${String(m).padStart(2, '0')}m` : `${m}m`;
 }
 
-/* 超出 n 项就合并成「其他」——饼图扇区太多就没法读了 */
+/* 超出 n 项就合并成「其他」——条目太多两种图都读不清 */
 function topN(items, n) {
   if (items.length <= n) return items.slice();
   const rest = items.slice(n);
@@ -263,49 +294,19 @@ function topN(items, n) {
   }]);
 }
 
-async function loadUsage(date) {
-  const day = date || $('us-date').value || new Date().toLocaleDateString('sv-SE');
-  $('us-date').value = day;
-  const r = await call('get_app_usage', day);
-  if (!r || r.error) return;
-  _usage = r;
-
-  const has = r.items.length > 0;
-  $('us-card').style.display = has ? 'block' : 'none';
-  $('us-empty').style.display = has ? 'none' : 'block';
-  $('us-sub').textContent = `${day} · 共 ${fmtDur(r.total_min)} · ${r.samples} 次采样`;
-  if (!has) return;
-
-  $('us-stats').innerHTML =
-    `<div class="card stat" style="margin:0"><div class="num">${r.items.length}</div>`
-    + `<div class="lbl">应用数</div></div>`
-    + `<div class="card stat" style="margin:0"><div class="num">${fmtDur(r.total_min)}</div>`
-    + `<div class="lbl">活跃时长</div></div>`
-    + `<div class="card stat" style="margin:0"><div class="num" style="font-size:20px">${esc(r.items[0].app)}</div>`
-    + `<div class="lbl">用得最多</div></div>`;
-  renderUsageChart();
-}
-
-function renderUsageChart() {
-  if (!_usage) return;
-  $('us-chart').innerHTML = _usageMode === 'pie'
-    ? pieHtml(topN(_usage.items, 5))
-    : barHtml(topN(_usage.items, 8));
-  $('us-note').textContent =
-    '按采集间隔采样估算：两次采样之间的应用切换无法捕捉，挂机时间不计入。'
-    + '数值是近似估算，不是精确计时。';
-}
-
+/* 竖向柱状图：div 高度百分比，同样不引图表库。
+   配色与饼图共用 PIE_COLORS，按序号取色——同一应用在两种图里颜色一致；
+   序号即后端返回的时长降序，所以柱子从左往右由高到低依次排开。 */
 function barHtml(items) {
   const max = Math.max(...items.map(i => i.minutes), 1);
-  return items.map(i => {
-    const other = i.app === '其他' ? ' other' : '';
-    return `<div class="bar-row">
-      <div class="bar-name" title="${esc(i.app)}">${esc(i.app)}</div>
-      <div class="bar-track"><span class="bar-fill${other}" style="width:${(i.minutes / max * 100).toFixed(1)}%"></span></div>
-      <div class="bar-value">${fmtDur(i.minutes)} · ${i.percent}%</div>
+  return '<div class="bar-chart">' + items.map((i, idx) => {
+    const color = PIE_COLORS[idx % PIE_COLORS.length];
+    return `<div class="bar-col" title="${esc(i.app)}：${fmtDur(i.minutes)} · ${i.percent}%">
+      <div class="bar-value">${fmtDur(i.minutes)}</div>
+      <div class="bar-track"><span class="bar-fill" style="height:${(i.minutes / max * 100).toFixed(1)}%;background:${color}"></span></div>
+      <div class="bar-name">${esc(i.app)}</div>
     </div>`;
-  }).join('');
+  }).join('') + '</div>';
 }
 
 function pieHtml(items) {
@@ -362,7 +363,6 @@ $('st-interval').querySelectorAll('button').forEach(b => b.addEventListener('cli
   _interval = Number(b.dataset.v);
   $('st-interval').querySelectorAll('button').forEach(x => x.classList.toggle('on', x === b));
 }));
-
 $('btn-save').addEventListener('click', async () => {
   const r = await call('save_settings', collectSettings());
   if (r && !r.error) toast('设置已保存');
