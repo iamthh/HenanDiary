@@ -10,6 +10,7 @@ pywebview 把本类实例的公开方法暴露给 window.pywebview.api.*。
 
 from __future__ import annotations
 
+import re
 import shutil
 import zipfile
 from datetime import date as _date, datetime, timedelta
@@ -256,6 +257,47 @@ class Api:
 
         return self._guard(run)
 
+    # ---------------------------------------------------------- 运行日志（F9）
+
+    def get_logs(self, level: str = "", limit: int = 200) -> Any:
+        """读日志文件给界面展示（F9），最新在前。
+
+        只读 logger.py 已经写好的文件，**不新增任何写入路径**。内存缓冲方案被否掉的理由：
+        它看不到进程启动阶段与上一次运行的记录，而「白窗口」「采集静默停摆」恰好发生在
+        界面还没起来的时候——那正是这个页面要服务的问题。
+        """
+        def run() -> dict[str, Any]:
+            wanted = level if level in _LOG_LEVELS else ""  # 认不出的值当「全部」，不报错
+            size = _clip_limit(limit)
+            lines: list[dict[str, str]] = []
+            files_read = 0
+            truncated = False
+            for path in _log_files():
+                if len(lines) >= size:
+                    truncated = True  # 更新的日志已够数，更旧的文件不必再看
+                    break
+                if not path.is_file():
+                    continue
+                files_read += 1
+                for record in reversed(_parse_log_file(path)):
+                    if wanted and record["level"] != wanted:
+                        continue
+                    if len(lines) >= size:
+                        truncated = True
+                        break
+                    lines.append(record)
+            return {"lines": lines, "files": files_read, "truncated": truncated}
+        return self._guard(run)
+
+    def open_logs_dir(self) -> Any:
+        """打开日志目录（要把整份日志发给别人排查时用）。"""
+        def run() -> dict[str, Any]:
+            path = config.get_logs_dir()
+            path.mkdir(parents=True, exist_ok=True)
+            shutil.os.startfile(path)
+            return {"ok": True}
+        return self._guard(run)
+
     # ---------------------------------------------------------- 设置页
 
     def get_settings(self) -> Any:
@@ -471,3 +513,62 @@ def _friendly_app(process_name: str) -> str:
 def _dumps(obj: Any) -> str:
     import json
     return json.dumps(obj, ensure_ascii=False, indent=2)
+
+
+# ---------------------------------------------------------- 日志读取（F9）
+
+# 与 logger.py::_FORMAT 一一对应：%(asctime)s [%(levelname)s] %(name)s: %(message)s，
+# asctime 默认带毫秒（2026-09-26 13:02:10,123），解析时丢掉。
+_LOG_LINE_RE = re.compile(
+    r"^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}),\d+ \[([A-Z]+)\] ([\w.]+): ?(.*)$"
+)
+
+_LOG_LEVELS = ("INFO", "WARNING", "ERROR")  # 界面四档筛选去掉「全部」后剩的三个值
+_LOG_DEFAULT_LIMIT = 200
+_LOG_MAX_LIMIT = 500   # 单次返回上限：本页每 60 秒拉一次，别让它拖慢界面
+_LOG_BACKUPS = 5       # 与 logger.py 的 backupCount 对齐：app.log + .1 ~ .5
+_LOG_MAX_MSG = 2000    # 单条正文上限：traceback 可能几万字符，超出部分不再拼接
+
+
+def _log_files() -> list[Path]:
+    """日志文件列表，从新到旧：app.log → app.log.1 → …（轮转时 app.log 改名成 .1）。"""
+    logs_dir = config.get_logs_dir()
+    return [logs_dir / "app.log"] + [
+        logs_dir / f"app.log.{i}" for i in range(1, _LOG_BACKUPS + 1)
+    ]
+
+
+def _clip_limit(limit: Any) -> int:
+    """把前端传来的 limit 收进合法区间；非法值不报错，回落默认值。"""
+    try:
+        size = int(limit)
+    except (TypeError, ValueError):
+        return _LOG_DEFAULT_LIMIT
+    return max(1, min(size, _LOG_MAX_LIMIT))
+
+
+def _parse_log_file(path: Path) -> list[dict[str, str]]:
+    """解析一个日志文件，返回按写入顺序（旧 → 新）的条目。
+
+    不匹配格式的行当作上一条的续行拼回正文——`log.exception` 的 traceback 走的就是
+    这条路，丢掉它等于丢掉报错现场。读取失败（轮转瞬间文件恰好被改名）只记日志、
+    返回空列表，不让界面报错。
+    """
+    try:
+        text = path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        log.warning("日志文件读取失败（可能正在轮转）：%s", path)
+        return []
+    records: list[dict[str, str]] = []
+    for line in text.splitlines():
+        matched = _LOG_LINE_RE.match(line)
+        if matched:
+            records.append({
+                "ts": matched.group(1),
+                "level": matched.group(2),
+                "name": matched.group(3),
+                "msg": matched.group(4),
+            })
+        elif records and len(records[-1]["msg"]) < _LOG_MAX_MSG:
+            records[-1]["msg"] += "\n" + line
+    return records

@@ -6,13 +6,16 @@
   --bad-border:#4a2525; --shadow:rgba(0,0,0,.4);
 }
 /* 明亮皮肤（需求 F8.1）：只换取值，变量名与暗色完全一致，所以布局规则一行都不用改。
-   --accent / --accent-dim 比暗色更深：它们要当按钮底色，白字压上去得满足 4.5:1 对比度；
-   它们也当输入框聚焦边框，深色在浅底上才看得出来。 */
+   主色调是冷蓝（2026-09-26，需求 v0.8）：中性色也一起转冷，否则暖米底配蓝点会打架。
+   --accent / --accent-dim 比暗色更深：它们要当按钮底色，白字压上去得满足 4.5:1 对比度
+   （#1d5fcc 压白字 5.90:1；淡蓝如 #4a90d9 只有 3.34:1，只能当底色不能当按钮填充）；
+   它们也当输入框聚焦边框，深色在浅底上才看得出来。
+   --ok / --bad 是语义色（正常/异常、采集运行中），不跟着主色调走，两档取值相同。 */
 html[data-theme="light"]{
-  --bg:#f7f4f0; --panel:#fff; --panel2:#f0ebe4; --border:#e0d8cd;
-  --text:#2b2622; --dim:#7d7468; --accent:#b8491a; --accent-dim:#8f3a13;
+  --bg:#f6f8fb; --panel:#fff; --panel2:#eef2f7; --border:#dbe3ec;
+  --text:#1f2733; --dim:#6b7683; --accent:#1d5fcc; --accent-dim:#16489c;
   --ok:#2e7d33; --bad:#c0392b;
-  --text-soft:#4a423a; --ok-bg:#e6f4e7; --accent-bg:#fbeee2; --bad-bg:#fbe9e7;
+  --text-soft:#3f4a57; --ok-bg:#e6f4e7; --accent-bg:#e6effc; --bad-bg:#fbe9e7;
   --bad-border:#e8c4c0; --shadow:rgba(0,0,0,.12);
 }
 *{box-sizing:border-box;margin:0;padding:0;font-family:"Microsoft YaHei UI","Segoe UI",sans-serif}
@@ -116,18 +119,19 @@ select:focus,input:focus{border-color:var(--accent-dim)}
   box-shadow:0 6px 24px var(--shadow);z-index:200;line-height:1.5}
 #toast.show{display:block}
 
-/* ---- 应用统计（M9）：饼图（手写内联 SVG 扇形）+ 竖向柱状图（div 高度百分比），都无图表库依赖 ---- */
-.bar-chart{display:flex;align-items:flex-end;gap:16px;height:170px}
-/* 等宽列：柱子在各列内居中，相邻柱间距才一致；否则列宽随应用名长短浮动，间距忽宽忽窄 */
-.bar-col{flex:1 1 0;min-width:0;max-width:100px;height:100%;
-  display:flex;flex-direction:column;align-items:center}
-.bar-name{font-size:12px;color:var(--dim);margin-top:6px;max-width:100%;
+/* ---- 应用统计（M9）：饼图（手写内联 SVG 扇形）+ 横向条形图（div 宽度百分比），都无图表库依赖 ---- */
+/* 横向条形：一行一个应用（名字 / 条 / 时长·占比），三列放在同一个 grid 里，
+   所以所有行的列宽统一。第一列 max-content —— 列宽由最长的进程名决定，
+   名字因此完整显示（旧的竖向柱状图列宽写死 72px，长名字要走省略号）。
+   200px 不是布局宽度，只是极端超长名的兜底上限，正常进程名碰不到。 */
+.bar-chart{display:grid;grid-template-columns:max-content minmax(60px,1fr) max-content;
+  gap:8px 10px;align-items:center}
+.bar-name{font-size:12px;color:var(--text);max-width:200px;
   overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.bar-track{flex:1;width:34px;display:flex;align-items:flex-end;
-  background:var(--panel2);border-radius:3px;overflow:hidden}
-/* 柱子颜色由 JS 内联指定（与饼图共用一套配色），不在这里写死 */
-.bar-fill{display:block;width:100%;border-radius:3px 3px 0 0}
-.bar-value{font-size:12px;color:var(--text);margin-bottom:6px}
+.bar-track{height:12px;background:var(--panel2);border-radius:3px;overflow:hidden}
+/* 条形颜色由 JS 内联指定（与饼图共用一套配色），不在这里写死 */
+.bar-fill{display:block;height:100%;border-radius:3px}
+.bar-value{font-size:12px;color:var(--dim);white-space:nowrap;font-variant-numeric:tabular-nums}
 .pie-wrap{display:flex;align-items:center;gap:18px}
 .pie-wrap svg{flex-shrink:0}
 .legend{flex:1;display:grid;gap:7px;min-width:0}
@@ -136,3 +140,22 @@ select:focus,input:focus{border-color:var(--accent-dim)}
 .legend-row .nm{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .legend-row .pct{margin-left:auto;color:var(--text);flex-shrink:0}
 .usage-note{color:var(--dim);font-size:12px;margin-top:14px;line-height:1.7}
+
+/* ---- 运行日志（F9）：一行一条，时间 / 级别 / 正文三列；颜色全走既有变量，不新增取值 ---- */
+.log-list{background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);
+  padding:2px 14px;max-height:calc(100vh - 232px);overflow-y:auto}
+.log-row{display:grid;grid-template-columns:130px 56px minmax(0,1fr);gap:10px;align-items:baseline;
+  padding:6px 0;border-bottom:1px solid var(--panel2)}
+.log-row:last-child{border-bottom:none}
+.log-ts{font-size:11px;color:var(--dim);font-variant-numeric:tabular-nums;white-space:nowrap}
+.log-lv{font-size:11px;white-space:nowrap}
+.log-lv.info{color:var(--dim)}
+/* 警告用琥珀：--accent 在明亮档是主色调蓝，当警告色会读成「链接」而不是「有问题」。
+   语义色本来就没有对应变量（--ok/--bad 同理），所以两档各固定一个取值：
+   暗色 #e0a94a / 面板底 8.2:1，明亮 #8a5a00 / 白底 5.9:1。 */
+.log-lv.warning{color:#e0a94a}
+html[data-theme="light"] .log-lv.warning{color:#8a5a00}
+.log-lv.error{color:var(--bad)}
+/* 正文用 pre-wrap：traceback 的续行必须保留换行，否则报错现场读不出来 */
+.log-msg{font-size:12px;color:var(--text);white-space:pre-wrap;overflow-wrap:anywhere}
+.log-empty{color:var(--dim);font-size:13px;padding:16px 0}

@@ -78,6 +78,7 @@ function go(page) {
   if (page === 'overview') loadOverview().then(() => loadOverviewUsage());
   if (page === 'timeline') loadTimelineDates();
   if (page === 'report') loadReports();
+  if (page === 'logs') loadLogs(true);
   if (page === 'settings') loadSettingsForm();
 }
 document.querySelectorAll('nav button').forEach(b => b.addEventListener('click', () => go(b.dataset.p)));
@@ -292,27 +293,32 @@ function topN(items, n) {
   }]);
 }
 
-/* 竖向柱状图：div 高度百分比，同样不引图表库。
-   配色与饼图共用 PIE_COLORS，按序号取色——同一应用在两种图里颜色一致；
-   序号即后端返回的时长降序，所以柱子从左往右由高到低依次排开。 */
+/* 横向条形图：div 宽度百分比，同样不引图表库。
+   一行一个应用，名字 / 条 / 时长·占比 三列同处一个 grid，列宽统一，名字列
+   max-content 由最长的进程名撑开，所以不截断。配色与饼图共用 PIE_COLORS，
+   按序号取色——同一应用在两种图里颜色一致；序号即后端返回的时长降序，
+   所以条形从上往下由长到短依次排开。 */
 function barHtml(items) {
   const max = Math.max(...items.map(i => i.minutes), 1);
   return '<div class="bar-chart">' + items.map((i, idx) => {
     const color = PIE_COLORS[idx % PIE_COLORS.length];
-    return `<div class="bar-col" title="${esc(i.app)}：${fmtDur(i.minutes)} · ${i.percent}%">
-      <div class="bar-value">${fmtDur(i.minutes)}</div>
-      <div class="bar-track"><span class="bar-fill" style="height:${(i.minutes / max * 100).toFixed(1)}%;background:${color}"></span></div>
-      <div class="bar-name">${esc(i.app)}</div>
-    </div>`;
+    const tip = `${esc(i.app)}：${fmtDur(i.minutes)} · ${i.percent}%`;
+    return `<span class="bar-name" title="${tip}">${esc(i.app)}</span>`
+      + `<span class="bar-track" title="${tip}">`
+      + `<i class="bar-fill" style="width:${(i.minutes / max * 100).toFixed(1)}%;background:${color}"></i>`
+      + '</span>'
+      + `<span class="bar-value">${fmtDur(i.minutes)} · ${i.percent}%</span>`;
   }).join('') + '</div>';
 }
 
 /* 图表配色：手写内联 SVG 扇形 + div 柱子，不引图表库（项目约束：零构建、零前端框架）。
    明/暗两套按皮肤取——同一套色换到浅色底上对比度不够（浅金 #d9c48a 尤其明显）。
+   明亮档六色都取「在 #fff 上刚好 3.25:1」的最浅值，即图形对比度达标前提下尽量提亮；
+   色相两两岔开、相邻也不同系——旧版前两色 (#1d5fcc/#4a90d9) 都是蓝，饼图上前两大块几乎分不开。
    饼图与柱状图共用同一套、按序号取色，所以同一应用在两种图里颜色一致。 */
 const THEME_COLORS = {
   dark: ['#d97a4a', '#e8a97e', '#8a4d30', '#6fbf73', '#d9c48a', '#6b5f52'],
-  light: ['#b8491a', '#d97a4a', '#8f3a13', '#2e7d33', '#ba7517', '#7d7468'],
+  light: ['#6192ca', '#cc7c2b', '#3b9d9a', '#a77eca', '#3da251', '#8090a3'],
 };
 
 /* 当前皮肤对应的那套色。applyTheme() 切皮肤时换掉它，图表函数因此一行都不用改。
@@ -370,6 +376,59 @@ function applyTheme(theme) {
   } catch (e) { /* 写不进去就退化为启动闪一帧，不影响本次切换 */ }
   if (_ovUsage) renderOverviewUsage();
 }
+
+/* ---------------------------------------------------------------- 运行日志（F9） */
+
+/* 日志只在「运行日志」页处于激活态时才拉（见 boot() 的 60 秒轮询）——这个页面是诊断用的，
+   没必要在别的页面后台轮询。_logSig 判内容有没有变：没变就不重绘，否则每 60 秒会把用户的
+   滚动位置和正在选中的文字一起抹掉。 */
+let _logLevel = '';
+let _logSig = null;
+let _logTopKey = null;   // 当前列表首行的标识，重绘时靠它算出「这次多出来几条」
+
+const logKey = (line) => line.ts + ' ' + line.msg;
+
+async function loadLogs(force) {
+  const r = await call('get_logs', _logLevel, 200);
+  if (!r || r.error) return;
+  const sig = _logLevel + '|' + r.lines.map(logKey).join('\u0000');
+  if (!force && sig === _logSig) return;
+  _logSig = sig;
+  renderLogs(r);
+}
+
+function renderLogs(data) {
+  const box = $('lg-list');
+  const keep = box.scrollTop > 2 ? _logTopKey : null;  // 只有滚下去过才需要保住位置
+  const rowH = box.firstElementChild ? box.firstElementChild.offsetHeight : 0;
+
+  box.innerHTML = data.lines.length
+    ? data.lines.map(l => `<div class="log-row" title="${esc(l.name)}">
+        <span class="log-ts">${esc(l.ts)}</span>
+        <span class="log-lv ${l.level.toLowerCase()}">${esc(l.level)}</span>
+        <span class="log-msg">${esc(l.msg)}</span>
+      </div>`).join('')
+    : '<div class="log-empty">这一类日志还没有记录。</div>';
+  _logTopKey = data.lines.length ? logKey(data.lines[0]) : null;
+
+  const total = data.lines.length;
+  $('lg-count').textContent = total
+    ? `共 ${total} 条${data.truncated ? `（仅显示最近 ${total} 条）` : ''}`
+    : '';
+
+  /* 新日志插在顶部：没滚动过就停在顶部；滚动过的按「新增条数 × 行高」补偿，
+     看着看着内容不会跳。旧首行已不在列表里（换档/被限量截掉）→ 回到顶部。 */
+  const moved = keep ? data.lines.findIndex(l => logKey(l) === keep) : 0;
+  box.scrollTop = moved > 0 && rowH ? moved * rowH : 0;
+}
+
+$('lg-level').querySelectorAll('button').forEach(b => b.addEventListener('click', () => {
+  _logLevel = b.dataset.v;
+  $('lg-level').querySelectorAll('button').forEach(x => x.classList.toggle('on', x === b));
+  loadLogs(true);
+}));
+$('btn-log-refresh').addEventListener('click', () => loadLogs(true));
+$('btn-log-dir').addEventListener('click', () => call('open_logs_dir'));
 
 /* ---------------------------------------------------------------- 设置 */
 
@@ -500,6 +559,10 @@ async function boot() {
     const active = document.querySelector('nav button.active');
     if (active && active.dataset.p === 'overview') loadOverview();
   }, 10000);  // 需求确认单：状态轮询 ~10s
+  setInterval(() => {
+    const active = document.querySelector('nav button.active');
+    if (active && active.dataset.p === 'logs') loadLogs(false);
+  }, 60000);  // F9：日志页 60 秒自动刷新，同样只在本页激活时拉
 }
 
 window.addEventListener('pywebviewready', boot);

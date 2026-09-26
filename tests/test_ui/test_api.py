@@ -286,3 +286,75 @@ def test_set_theme_rejects_unknown_value(api) -> None:
     result = api.set_theme("solarized")
     assert "error" in result  # _guard 捕获 ValueError，不抛穿
     assert config.load_settings()["ui"]["theme"] == "dark"  # 坏值不落盘
+
+
+# ---------------------------------------------------------------- 运行日志（F9）
+
+def _write_log(name: str, lines: list[str]) -> None:
+    """往日志目录写一个假日志文件（格式同 logger.py 的 _FORMAT）。"""
+    path = config.get_logs_dir() / name
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def test_get_logs_without_file_returns_empty(api) -> None:
+    """刚装完还没写过日志：返回空列表，不是报错。"""
+    result = api.get_logs()
+    assert "error" not in result
+    assert result["lines"] == [] and result["truncated"] is False
+
+
+def test_get_logs_parses_and_sorts_newest_first(api) -> None:
+    _write_log("app.log", [
+        "2026-09-26 13:02:10,123 [INFO] henandiary.main: 主窗口启动",
+        "2026-09-26 13:02:11,001 [WARNING] henandiary.ui.api: 工作时间配置非法",
+    ])
+    result = api.get_logs()
+    assert [line["msg"] for line in result["lines"]] == ["工作时间配置非法", "主窗口启动"]
+    assert result["lines"][0]["ts"] == "2026-09-26 13:02:11"
+    assert result["lines"][0]["level"] == "WARNING"
+    assert result["lines"][0]["name"] == "henandiary.ui.api"
+
+
+def test_get_logs_keeps_traceback_continuation(api) -> None:
+    """log.exception 的 traceback 续行必须并入上一条，否则报错现场就没了。"""
+    _write_log("app.log", [
+        "2026-09-26 22:00:03,500 [ERROR] henandiary.report.generator: 日报生成失败",
+        "Traceback (most recent call last):",
+        '  File "report/generator.py", line 42, in generate_daily_report',
+        "    raise RuntimeError('timeout')",
+        "RuntimeError: timeout",
+    ])
+    msg = api.get_logs()["lines"][0]["msg"]
+    assert msg.startswith("日报生成失败")
+    assert "RuntimeError: timeout" in msg
+
+
+def test_get_logs_filters_by_level(api) -> None:
+    _write_log("app.log", [
+        "2026-09-26 13:00:00,000 [INFO] henandiary.main: 正常",
+        "2026-09-26 13:00:01,000 [ERROR] henandiary.ai.client: 调用失败",
+        "2026-09-26 13:00:02,000 [WARNING] henandiary.collector.screenshot: 采样失败",
+    ])
+    assert [line["msg"] for line in api.get_logs("ERROR")["lines"]] == ["调用失败"]
+    assert len(api.get_logs("")["lines"]) == 3
+    # 界面只有四档，认不出的级别值当「全部」处理，不报错
+    assert len(api.get_logs("CRITICAL")["lines"]) == 3
+
+
+def test_get_logs_limit_keeps_newest_and_flags_truncated(api) -> None:
+    _write_log("app.log", [
+        f"2026-09-26 13:00:0{i},000 [INFO] henandiary.main: 第 {i} 条" for i in range(5)
+    ])
+    result = api.get_logs("", 2)
+    assert [line["msg"] for line in result["lines"]] == ["第 4 条", "第 3 条"]
+    assert result["truncated"] is True
+
+
+def test_get_logs_reads_rotated_files_after_current(api) -> None:
+    """app.log 里的条数不够时回溯备份：轮转时 app.log 改名成 app.log.1，越靠后越旧。"""
+    _write_log("app.log.1", ["2026-09-26 12:00:00,000 [INFO] henandiary.main: 更旧的记录"])
+    _write_log("app.log", ["2026-09-26 13:00:00,000 [INFO] henandiary.main: 最新的记录"])
+    result = api.get_logs()
+    assert [line["msg"] for line in result["lines"]] == ["最新的记录", "更旧的记录"]
+    assert result["files"] == 2
