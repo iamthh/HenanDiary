@@ -32,6 +32,7 @@ try {
     <button data-p="overview" class="active">☀ 今日总览</button>
     <button data-p="timeline">⧗ 时间线</button>
     <button data-p="report">✎ 日报 / 周报</button>
+    <button data-p="logs">≡ 运行日志</button>
     <button data-p="settings">⚙ 设置</button>
   </nav>
   <div class="side-bottom" id="side-status">…</div>
@@ -96,6 +97,21 @@ try {
     </div>
     <div class="card report-body" id="rp-body"><span style="color:var(--dim)">← 选一份报表看看</span></div>
   </div>
+</section>
+
+<!-- 运行日志 -->
+<section class="page" id="p-logs">
+  <h1>运行日志</h1>
+  <div class="sub">查看运行记录与分析报错原因，最新在前 · 本页打开时每 60 秒自动刷新</div>
+  <div class="row" style="margin-bottom:14px">
+    <div class="seg" id="lg-level">
+      <button data-v="" class="on">全部</button><button data-v="INFO">信息</button><button data-v="WARNING">警告</button><button data-v="ERROR">错误</button>
+    </div>
+    <button class="ghost" id="btn-log-refresh">刷新</button>
+    <span id="lg-count" style="font-size:12px;color:var(--dim)"></span>
+    <button class="ghost" id="btn-log-dir" style="margin-left:auto">打开日志目录</button>
+  </div>
+  <div class="log-list" id="lg-list"></div>
 </section>
 
 <!-- 设置 -->

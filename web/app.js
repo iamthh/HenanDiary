@@ -78,6 +78,7 @@ function go(page) {
   if (page === 'overview') loadOverview().then(() => loadOverviewUsage());
   if (page === 'timeline') loadTimelineDates();
   if (page === 'report') loadReports();
+  if (page === 'logs') loadLogs(true);
   if (page === 'settings') loadSettingsForm();
 }
 document.querySelectorAll('nav button').forEach(b => b.addEventListener('click', () => go(b.dataset.p)));
@@ -376,6 +377,59 @@ function applyTheme(theme) {
   if (_ovUsage) renderOverviewUsage();
 }
 
+/* ---------------------------------------------------------------- 运行日志（F9） */
+
+/* 日志只在「运行日志」页处于激活态时才拉（见 boot() 的 60 秒轮询）——这个页面是诊断用的，
+   没必要在别的页面后台轮询。_logSig 判内容有没有变：没变就不重绘，否则每 60 秒会把用户的
+   滚动位置和正在选中的文字一起抹掉。 */
+let _logLevel = '';
+let _logSig = null;
+let _logTopKey = null;   // 当前列表首行的标识，重绘时靠它算出「这次多出来几条」
+
+const logKey = (line) => line.ts + ' ' + line.msg;
+
+async function loadLogs(force) {
+  const r = await call('get_logs', _logLevel, 200);
+  if (!r || r.error) return;
+  const sig = _logLevel + '|' + r.lines.map(logKey).join('\u0000');
+  if (!force && sig === _logSig) return;
+  _logSig = sig;
+  renderLogs(r);
+}
+
+function renderLogs(data) {
+  const box = $('lg-list');
+  const keep = box.scrollTop > 2 ? _logTopKey : null;  // 只有滚下去过才需要保住位置
+  const rowH = box.firstElementChild ? box.firstElementChild.offsetHeight : 0;
+
+  box.innerHTML = data.lines.length
+    ? data.lines.map(l => `<div class="log-row" title="${esc(l.name)}">
+        <span class="log-ts">${esc(l.ts)}</span>
+        <span class="log-lv ${l.level.toLowerCase()}">${esc(l.level)}</span>
+        <span class="log-msg">${esc(l.msg)}</span>
+      </div>`).join('')
+    : '<div class="log-empty">这一类日志还没有记录。</div>';
+  _logTopKey = data.lines.length ? logKey(data.lines[0]) : null;
+
+  const total = data.lines.length;
+  $('lg-count').textContent = total
+    ? `共 ${total} 条${data.truncated ? `（仅显示最近 ${total} 条）` : ''}`
+    : '';
+
+  /* 新日志插在顶部：没滚动过就停在顶部；滚动过的按「新增条数 × 行高」补偿，
+     看着看着内容不会跳。旧首行已不在列表里（换档/被限量截掉）→ 回到顶部。 */
+  const moved = keep ? data.lines.findIndex(l => logKey(l) === keep) : 0;
+  box.scrollTop = moved > 0 && rowH ? moved * rowH : 0;
+}
+
+$('lg-level').querySelectorAll('button').forEach(b => b.addEventListener('click', () => {
+  _logLevel = b.dataset.v;
+  $('lg-level').querySelectorAll('button').forEach(x => x.classList.toggle('on', x === b));
+  loadLogs(true);
+}));
+$('btn-log-refresh').addEventListener('click', () => loadLogs(true));
+$('btn-log-dir').addEventListener('click', () => call('open_logs_dir'));
+
 /* ---------------------------------------------------------------- 设置 */
 
 let _interval = 5;
@@ -505,6 +559,10 @@ async function boot() {
     const active = document.querySelector('nav button.active');
     if (active && active.dataset.p === 'overview') loadOverview();
   }, 10000);  // 需求确认单：状态轮询 ~10s
+  setInterval(() => {
+    const active = document.querySelector('nav button.active');
+    if (active && active.dataset.p === 'logs') loadLogs(false);
+  }, 60000);  // F9：日志页 60 秒自动刷新，同样只在本页激活时拉
 }
 
 window.addEventListener('pywebviewready', boot);

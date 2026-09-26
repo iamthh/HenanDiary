@@ -140,3 +140,22 @@ select:focus,input:focus{border-color:var(--accent-dim)}
 .legend-row .nm{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .legend-row .pct{margin-left:auto;color:var(--text);flex-shrink:0}
 .usage-note{color:var(--dim);font-size:12px;margin-top:14px;line-height:1.7}
+
+/* ---- 运行日志（F9）：一行一条，时间 / 级别 / 正文三列；颜色全走既有变量，不新增取值 ---- */
+.log-list{background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);
+  padding:2px 14px;max-height:calc(100vh - 232px);overflow-y:auto}
+.log-row{display:grid;grid-template-columns:130px 56px minmax(0,1fr);gap:10px;align-items:baseline;
+  padding:6px 0;border-bottom:1px solid var(--panel2)}
+.log-row:last-child{border-bottom:none}
+.log-ts{font-size:11px;color:var(--dim);font-variant-numeric:tabular-nums;white-space:nowrap}
+.log-lv{font-size:11px;white-space:nowrap}
+.log-lv.info{color:var(--dim)}
+/* 警告用琥珀：--accent 在明亮档是主色调蓝，当警告色会读成「链接」而不是「有问题」。
+   语义色本来就没有对应变量（--ok/--bad 同理），所以两档各固定一个取值：
+   暗色 #e0a94a / 面板底 8.2:1，明亮 #8a5a00 / 白底 5.9:1。 */
+.log-lv.warning{color:#e0a94a}
+html[data-theme="light"] .log-lv.warning{color:#8a5a00}
+.log-lv.error{color:var(--bad)}
+/* 正文用 pre-wrap：traceback 的续行必须保留换行，否则报错现场读不出来 */
+.log-msg{font-size:12px;color:var(--text);white-space:pre-wrap;overflow-wrap:anywhere}
+.log-empty{color:var(--dim);font-size:13px;padding:16px 0}
