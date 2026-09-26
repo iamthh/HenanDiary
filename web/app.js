@@ -292,18 +292,21 @@ function topN(items, n) {
   }]);
 }
 
-/* 竖向柱状图：div 高度百分比，同样不引图表库。
-   配色与饼图共用 PIE_COLORS，按序号取色——同一应用在两种图里颜色一致；
-   序号即后端返回的时长降序，所以柱子从左往右由高到低依次排开。 */
+/* 横向条形图：div 宽度百分比，同样不引图表库。
+   一行一个应用，名字 / 条 / 时长·占比 三列同处一个 grid，列宽统一，名字列
+   max-content 由最长的进程名撑开，所以不截断。配色与饼图共用 PIE_COLORS，
+   按序号取色——同一应用在两种图里颜色一致；序号即后端返回的时长降序，
+   所以条形从上往下由长到短依次排开。 */
 function barHtml(items) {
   const max = Math.max(...items.map(i => i.minutes), 1);
   return '<div class="bar-chart">' + items.map((i, idx) => {
     const color = PIE_COLORS[idx % PIE_COLORS.length];
-    return `<div class="bar-col" title="${esc(i.app)}：${fmtDur(i.minutes)} · ${i.percent}%">
-      <div class="bar-value">${fmtDur(i.minutes)}</div>
-      <div class="bar-track"><span class="bar-fill" style="height:${(i.minutes / max * 100).toFixed(1)}%;background:${color}"></span></div>
-      <div class="bar-name">${esc(i.app)}</div>
-    </div>`;
+    const tip = `${esc(i.app)}：${fmtDur(i.minutes)} · ${i.percent}%`;
+    return `<span class="bar-name" title="${tip}">${esc(i.app)}</span>`
+      + `<span class="bar-track" title="${tip}">`
+      + `<i class="bar-fill" style="width:${(i.minutes / max * 100).toFixed(1)}%;background:${color}"></i>`
+      + '</span>'
+      + `<span class="bar-value">${fmtDur(i.minutes)} · ${i.percent}%</span>`;
   }).join('') + '</div>';
 }
 

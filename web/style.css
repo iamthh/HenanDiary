@@ -119,18 +119,19 @@ select:focus,input:focus{border-color:var(--accent-dim)}
   box-shadow:0 6px 24px var(--shadow);z-index:200;line-height:1.5}
 #toast.show{display:block}
 
-/* ---- 应用统计（M9）：饼图（手写内联 SVG 扇形）+ 竖向柱状图（div 高度百分比），都无图表库依赖 ---- */
-.bar-chart{display:flex;align-items:flex-end;gap:16px;height:170px}
-/* 等宽列：柱子在各列内居中，相邻柱间距才一致；否则列宽随应用名长短浮动，间距忽宽忽窄 */
-.bar-col{flex:1 1 0;min-width:0;max-width:100px;height:100%;
-  display:flex;flex-direction:column;align-items:center}
-.bar-name{font-size:12px;color:var(--dim);margin-top:6px;max-width:100%;
+/* ---- 应用统计（M9）：饼图（手写内联 SVG 扇形）+ 横向条形图（div 宽度百分比），都无图表库依赖 ---- */
+/* 横向条形：一行一个应用（名字 / 条 / 时长·占比），三列放在同一个 grid 里，
+   所以所有行的列宽统一。第一列 max-content —— 列宽由最长的进程名决定，
+   名字因此完整显示（旧的竖向柱状图列宽写死 72px，长名字要走省略号）。
+   200px 不是布局宽度，只是极端超长名的兜底上限，正常进程名碰不到。 */
+.bar-chart{display:grid;grid-template-columns:max-content minmax(60px,1fr) max-content;
+  gap:8px 10px;align-items:center}
+.bar-name{font-size:12px;color:var(--text);max-width:200px;
   overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.bar-track{flex:1;width:34px;display:flex;align-items:flex-end;
-  background:var(--panel2);border-radius:3px;overflow:hidden}
-/* 柱子颜色由 JS 内联指定（与饼图共用一套配色），不在这里写死 */
-.bar-fill{display:block;width:100%;border-radius:3px 3px 0 0}
-.bar-value{font-size:12px;color:var(--text);margin-bottom:6px}
+.bar-track{height:12px;background:var(--panel2);border-radius:3px;overflow:hidden}
+/* 条形颜色由 JS 内联指定（与饼图共用一套配色），不在这里写死 */
+.bar-fill{display:block;height:100%;border-radius:3px}
+.bar-value{font-size:12px;color:var(--dim);white-space:nowrap;font-variant-numeric:tabular-nums}
 .pie-wrap{display:flex;align-items:center;gap:18px}
 .pie-wrap svg{flex-shrink:0}
 .legend{flex:1;display:grid;gap:7px;min-width:0}
