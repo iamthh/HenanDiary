@@ -1,15 +1,19 @@
 <!DOCTYPE html>
-<html lang="zh-CN" data-theme="dark">
+<html lang="zh-CN" data-theme="dark" data-style="graphite">
 <head>
 <meta charset="UTF-8">
 <title>HenanDiary</title>
 <script>
-/* 首帧防闪烁：皮肤真值要等后端 get_state() 才回来，先拿上次的缓存值把 <html data-theme>
-   定下来，避免明亮皮肤的用户先看到一帧暗色。这只是提示位、不是配置来源——
-   boot() 拿到后端值后会覆盖它，真相始终在 settings.json。读不到就按默认暗色渲染。 */
+/* 首帧防闪烁：外观真值要等后端 get_state() 才回来，先拿上次的缓存值把 <html> 上的
+   data-style / data-theme 定下来，避免用户先看到一帧默认外观。这只是提示位、不是配置来源——
+   boot() 拿到后端值后会覆盖它，真相始终在 settings.json。读不到就按默认（记录仪 + 暗色）渲染。 */
 try {
   var _t = localStorage.getItem('hd-theme');
   if (_t === 'light' || _t === 'dark') document.documentElement.dataset.theme = _t;
+  var _s = localStorage.getItem('hd-style');
+  if (_s === 'graphite' || _s === 'cartoon' || _s === 'pixel') {
+    document.documentElement.dataset.style = _s;
+  }
 } catch (e) { /* 隐私模式等场景下不可读，退化为启动闪一帧，不影响功能 */ }
 </script>
 <link rel="stylesheet" href="style.css">
@@ -285,12 +289,20 @@ try {
     <div class="form-panel">
       <h2>外观</h2>
       <div class="form-row">
-        <label>皮肤</label>
+        <label>风格</label>
+        <div class="ctl">
+          <div class="seg" id="st-style">
+            <button data-v="graphite">记录仪</button><button data-v="cartoon">卡通贴纸</button><button data-v="pixel">像素复古</button>
+          </div>
+          <span class="hint">选中即生效并自动保存</span>
+        </div>
+      </div>
+      <div class="form-row">
+        <label>明暗</label>
         <div class="ctl">
           <div class="seg" id="st-theme">
             <button data-v="dark">暗色</button><button data-v="light">明亮</button>
           </div>
-          <span class="hint">选中即生效并自动保存</span>
         </div>
       </div>
     </div>

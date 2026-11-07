@@ -288,6 +288,33 @@ def test_set_theme_rejects_unknown_value(api) -> None:
     assert config.load_settings()["ui"]["theme"] == "dark"  # 坏值不落盘
 
 
+def test_set_style_persists_without_rescheduling(api) -> None:
+    hits = []
+    api.attach(on_settings_saved=lambda: hits.append(1))
+
+    assert api.set_style("pixel") == {"ok": True, "style": "pixel"}
+    assert config.load_settings()["ui"]["style"] == "pixel"
+    assert api.get_settings()["style"] == "pixel"
+    assert api.get_state()["style"] == "pixel"
+    assert hits == []  # 换风格与日报/周报调度无关，不该触发重排
+
+
+def test_set_style_keeps_theme(api) -> None:
+    """两个维度互不覆盖：切风格不该把明暗带回默认值。"""
+    api.set_theme("light")
+    api.set_style("cartoon")
+
+    settings = api.get_settings()
+    assert settings["style"] == "cartoon"
+    assert settings["theme"] == "light"
+
+
+def test_set_style_rejects_unknown_value(api) -> None:
+    result = api.set_style("vaporwave")
+    assert "error" in result
+    assert config.load_settings()["ui"]["style"] == "graphite"  # 坏值不落盘
+
+
 # ---------------------------------------------------------------- 运行日志（F9）
 
 def _write_log(name: str, lines: list[str]) -> None:

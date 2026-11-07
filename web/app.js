@@ -538,7 +538,8 @@ function barHtml(items) {
 
 /* ---------------------------------------------------------------- 外观皮肤 */
 
-/* 切皮肤 = 换 <html data-theme>，色值全在 CSS 变量里，图表不需要重取配色。
+/* 切外观 = 换 <html data-style> / <html data-theme>，色值与形态全在 CSS 变量里，
+   图表不需要重取配色（fill/stroke 用的是 var(--s1..--s5)）。
    不走「值没变就 return」：boot() 也要借这一步把首帧缓存写稳。
    应用统计卡只重渲染、不重新取数（沿用 _ovUsage 缓存，和切换占比/时长同一个约定）。 */
 function applyTheme(theme) {
@@ -546,6 +547,17 @@ function applyTheme(theme) {
   try {
     localStorage.setItem('hd-theme', theme);   // 只给下次启动的首帧用（见 index.html 内联脚本）
   } catch (e) { /* 写不进去就退化为启动闪一帧，不影响本次切换 */ }
+  if (_ovUsage) renderOverviewUsage();
+}
+
+/* 风格与明暗是两个独立维度：各自落盘、各自生效，互不覆盖。
+   形态差异走 CSS，所以这里同样只需要换 data-style —— 同样要重绘一次应用统计卡，
+   因为环形图的扇区间隙与图例换了形状（--s* 色阶取值也跟着变）。 */
+function applyStyle(style) {
+  document.documentElement.dataset.style = style;
+  try {
+    localStorage.setItem('hd-style', style);
+  } catch (e) { /* 同上：缓存写不进去不影响本次切换 */ }
   if (_ovUsage) renderOverviewUsage();
 }
 
@@ -631,12 +643,14 @@ async function loadSettingsForm() {
     b.classList.toggle('on', Number(b.dataset.v) === _interval));
   $('st-theme').querySelectorAll('button').forEach(b =>
     b.classList.toggle('on', b.dataset.v === s.theme));
+  $('st-style').querySelectorAll('button').forEach(b =>
+    b.classList.toggle('on', b.dataset.v === s.style));
 }
 $('st-interval').querySelectorAll('button').forEach(b => b.addEventListener('click', () => {
   _interval = Number(b.dataset.v);
   $('st-interval').querySelectorAll('button').forEach(x => x.classList.toggle('on', x === b));
 }));
-/* 皮肤是「选中即生效」：先把值落盘，成功了才换界面，避免出现「看着变了其实没存」 */
+/* 外观是「选中即生效」：先把值落盘，成功了才换界面，避免出现「看着变了其实没存」 */
 $('st-theme').querySelectorAll('button').forEach(b => b.addEventListener('click', async () => {
   const theme = b.dataset.v;
   if (document.documentElement.dataset.theme === theme) return;
@@ -644,6 +658,14 @@ $('st-theme').querySelectorAll('button').forEach(b => b.addEventListener('click'
   if (!r || r.error) return;
   applyTheme(theme);
   $('st-theme').querySelectorAll('button').forEach(x => x.classList.toggle('on', x === b));
+}));
+$('st-style').querySelectorAll('button').forEach(b => b.addEventListener('click', async () => {
+  const style = b.dataset.v;
+  if (document.documentElement.dataset.style === style) return;
+  const r = await call('set_style', style);
+  if (!r || r.error) return;
+  applyStyle(style);
+  $('st-style').querySelectorAll('button').forEach(x => x.classList.toggle('on', x === b));
 }));
 
 $('btn-save').addEventListener('click', async () => {
@@ -733,7 +755,10 @@ async function boot() {
   if (window._booted) return;
   window._booted = true;
   const s = await call('get_state');
-  if (s && !s.error) applyTheme(s.theme);  // 后端是唯一真相，覆盖 index.html 的首帧提示
+  if (s && !s.error) {
+    applyStyle(s.style);   // 后端是唯一真相，覆盖 index.html 的首帧提示
+    applyTheme(s.theme);
+  }
   if (s && !s.error && s.onboarding_done) {
     $('sidebar').style.display = 'flex';
     go('overview');

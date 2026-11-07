@@ -120,6 +120,7 @@ class Api:
         return {
             "date": today,
             "theme": settings["ui"]["theme"],
+            "style": settings["ui"]["style"],
             "onboarding_done": settings["onboarding"]["done"],
             "capture": {
                 "enabled": capture["enabled"],
@@ -312,6 +313,7 @@ class Api:
                 "daily_time": s["report"]["daily_time"],
                 "overwrite_time": s["report"]["overwrite_time"],
                 "theme": s["ui"]["theme"],
+                "style": s["ui"]["style"],
             }
         return self._guard(run)
 
@@ -352,6 +354,18 @@ class Api:
             applied = config.update_settings({"ui": {"theme": theme}})["ui"]["theme"]
             log.info("皮肤已切换 theme=%s", applied)
             return {"ok": True, "theme": applied}
+        return self._guard(run)
+
+    def set_style(self, style: str) -> Any:
+        """切换界面风格（需求 F8.2：graphite / cartoon / pixel）。与 set_theme 完全对称：
+
+        风格与明暗是两个独立维度，各自落盘、各自生效，互不覆盖；
+        同样不触发 on_settings_saved（换外观不该重排定时任务）。
+        """
+        def run() -> dict[str, Any]:
+            applied = config.update_settings({"ui": {"style": style}})["ui"]["style"]
+            log.info("界面风格已切换 style=%s", applied)
+            return {"ok": True, "style": applied}
         return self._guard(run)
 
     def test_connection(self) -> Any:
