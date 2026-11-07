@@ -388,3 +388,275 @@ input::placeholder{color:var(--tx3)}
   background-clip:content-box}
 ::-webkit-scrollbar-thumb:hover{background:var(--line2);background-clip:content-box}
 ::-webkit-scrollbar-track{background:transparent}
+
+/* ============================================================ 外观（F8.1 / F8.2）
+
+   两个独立维度，互不干扰：
+   - 风格（data-style）决定形态与密度：圆角、描边厚度、阴影、字体、底纹、卡片化程度
+   - 明暗（data-theme）只决定明度阶梯
+
+   记录仪档（graphite）的取值就是上面的 :root 与 [data-theme=light] 两块，本段不碰它——
+   加这两款皮肤时记录仪必须像素级不变，所以所有规则都挂在 html[data-style=...] 上。
+
+   书写顺序有讲究：风格块必须排在明暗块之后。否则「像素 + 明亮」会落回卡通明亮的取值，
+   因为 html[data-style=pixel] 与 [data-theme=light] 权重相同、靠先后决定胜负。
+
+   分隔线纪律：卡片的描边走 --bw，但卡片内部的分隔线（.metric 之间、.form-row 行线、
+   .excerpt-foot 顶线）一律保持 1px。记录仪的行距节奏靠这些细线撑，加粗会立刻散架。
+   ============================================================ */
+
+/* 强调色当文字用与当填充用要分家：像素档的淡黄压在白底上等于看不见，
+   所以文字色单独走 --accent-fg（记录仪档与 --accent 同值，等于没变）。 */
+:root{ --accent-fg:var(--accent) }
+.tag.wait,.excerpt-foot .more,.date-item.on,.log-lv.warning,
+aside nav button.on .ic{ color:var(--accent-fg) }
+
+/* ---- 卡通贴纸 · 暗色 ---- */
+html[data-style="cartoon"]{
+  --bg:#241c3c; --panel:#3a3157; --panel2:#4b4070; --panel3:#584c80;
+  --line:rgba(253,246,255,.16); --line2:#120c22;
+  --tx:#fdf6ff; --tx2:#d9cdf5; --tx3:#ab9fd0;
+  --accent:#ff85c1; --accent-ink:#241c3c; --accent-fg:#ffa8d2;
+  --ok:#6ee7a8; --bad:#ff8f8f;
+  --s1:#ff85c1; --s2:#c4a8ff; --s3:#7c6da0; --s4:#5f5485; --s5:#4b4270;
+  --bar:#8a7cb0;
+  --c-dev:#7dd3fc; --c-doc:#ffcf4d; --c-im:#6ee7a8; --c-web:#c4a8ff; --c-etc:#ffa07a;
+  --r:18px; --r-sm:12px; --r-xs:7px;
+  --shadow-hard:#100a20;
+  --font-title:"幼圆","YouYuan","Microsoft YaHei UI",sans-serif;
+}
+/* ---- 卡通贴纸 · 明亮 ---- */
+html[data-style="cartoon"][data-theme="light"]{
+  --bg:#fff6ef; --panel:#fff; --panel2:#fdeaf3; --panel3:#f9dbe9;
+  --line:rgba(43,31,58,.16); --line2:#2b1f3a;
+  --tx:#2b1f3a; --tx2:#5f4c72; --tx3:#7f6d8e;
+  --accent:#c2327a; --accent-ink:#fff; --accent-fg:#c2327a;
+  --ok:#128a4f; --bad:#d93c3c;
+  --s1:#c2327a; --s2:#6d28d9; --s3:#8b8496; --s4:#a29aa9; --s5:#bab3c0;
+  --bar:#c8c0d2;
+  --c-dev:#1d5fcc; --c-doc:#8a6100; --c-im:#128a4f; --c-web:#6d28d9; --c-etc:#a8401a;
+  --shadow-hard:rgba(43,31,58,.9);
+}
+
+/* ---- 像素复古 · 暗色 ---- */
+html[data-style="pixel"]{
+  --bg:#14121f; --panel:#1e1b2e; --panel2:#272241; --panel3:#332c52;
+  --line:rgba(235,230,255,.16); --line2:#6b5f9e;
+  --tx:#ebe6ff; --tx2:#c2bbe0; --tx3:#8b82b3;
+  --accent:#ffe9a0; --accent-ink:#14121f; --accent-fg:#ffcf4d;
+  --ok:#6ee7a8; --bad:#ff6b8a;
+  --s1:#ffcf4d; --s2:#9aa0ff; --s3:#5c5580; --s4:#4a4468; --s5:#3b3656;
+  --bar:#6d6690;
+  --c-dev:#7dd3fc; --c-doc:#ffcf4d; --c-im:#6ee7a8; --c-web:#c4a8ff; --c-etc:#ff9b8a;
+  --r:0px; --r-sm:0px; --r-xs:0px;
+  --font-title:Consolas,"SimSun",monospace;
+}
+/* ---- 像素复古 · 明亮 ---- */
+html[data-style="pixel"][data-theme="light"]{
+  --bg:#f4f1ff; --panel:#fff; --panel2:#ece7ff; --panel3:#ded7f2;
+  --line:rgba(26,22,48,.17); --line2:#3b3363;
+  --tx:#1a1630; --tx2:#463d6b; --tx3:#6b6389;
+  --accent:#ffe9a0; --accent-ink:#1a1630; --accent-fg:#8a6100;
+  --ok:#12684a; --bad:#b8283f;
+  --s1:#8a6100; --s2:#6d28d9; --s3:#8d8899; --s4:#a4a0af; --s5:#bcb8c5;
+  --bar:#c3bfd0;
+  --c-dev:#1d5fcc; --c-doc:#8a6100; --c-im:#12684a; --c-web:#6d28d9; --c-etc:#a8401a;
+}
+
+/* ---------- 卡通贴纸：形态与密度 ---------- */
+html[data-style="cartoon"] body{
+  background:radial-gradient(rgba(255,255,255,.055) 1px,transparent 1px) 0 0/16px 16px,var(--bg);
+}
+html[data-style="cartoon"][data-theme="light"] body{
+  background:radial-gradient(rgba(43,31,58,.07) 1px,transparent 1px) 0 0/16px 16px,var(--bg);
+}
+html[data-style="cartoon"] .titlebar{height:46px;border-bottom:2px solid var(--line2)}
+html[data-style="cartoon"] .brand{font-family:var(--font-title);font-size:14px}
+html[data-style="cartoon"] .brand .mark{border-radius:7px;border:2px solid var(--line2)}
+
+html[data-style="cartoon"] aside{width:222px;padding:18px 14px 14px;border-right:2px solid var(--line2)}
+html[data-style="cartoon"] aside nav{gap:6px;margin-top:12px}
+html[data-style="cartoon"] aside nav button{
+  height:42px;border-radius:14px;font-size:13px;padding:0 12px;border:2px solid transparent;
+}
+html[data-style="cartoon"] aside nav button:hover{background:var(--panel2);border-color:var(--line2)}
+html[data-style="cartoon"] aside nav button.on{
+  background:var(--accent);color:var(--accent-ink);border-color:var(--line2);
+  box-shadow:2px 2px 0 var(--shadow-hard);font-weight:500;
+}
+html[data-style="cartoon"] aside nav button.on .ic{color:var(--accent-ink)}
+html[data-style="cartoon"] .side-foot{border-top:2px solid var(--line2);font-size:11.5px}
+
+html[data-style="cartoon"] .wrap{padding:30px 36px 56px}
+html[data-style="cartoon"] .page-head h1{
+  font-family:var(--font-title);font-size:26px;font-weight:400;letter-spacing:0;
+}
+html[data-style="cartoon"] .page-head{margin-bottom:24px}
+
+/* 四格指标从「读数」变回「卡片」：卡片本身就是这套皮肤的语言 */
+html[data-style="cartoon"] .metrics{gap:14px;border:none;margin-bottom:30px}
+html[data-style="cartoon"] .metric{
+  background:var(--panel);border:2px solid var(--line2);border-radius:16px;
+  padding:15px 17px 17px;box-shadow:4px 4px 0 var(--shadow-hard);
+}
+html[data-style="cartoon"] .metric:first-child{padding-left:17px;border-left:2px solid var(--line2)}
+html[data-style="cartoon"] .metric .k{font-size:11.5px}
+html[data-style="cartoon"] .metric .v{
+  font-family:var(--font-title);font-size:25px;margin-top:7px;letter-spacing:0;
+}
+html[data-style="cartoon"] .metric .m{font-size:11px;margin-top:5px}
+
+html[data-style="cartoon"] .block{margin-bottom:30px}
+html[data-style="cartoon"] .block-head h2{font-family:var(--font-title);font-size:15px}
+html[data-style="cartoon"] .panel{
+  border:2px solid var(--line2);border-radius:18px;
+  box-shadow:4px 4px 0 var(--shadow-hard);padding:22px 24px;
+}
+html[data-style="cartoon"] .form-panel{
+  border:2px solid var(--line2);border-radius:18px;
+  box-shadow:4px 4px 0 var(--shadow-hard);padding:6px 26px;
+}
+html[data-style="cartoon"] .date-col,
+html[data-style="cartoon"] .report-main,
+html[data-style="cartoon"] .log-box,
+html[data-style="cartoon"] .modal{
+  border:2px solid var(--line2);border-radius:18px;box-shadow:4px 4px 0 var(--shadow-hard);
+}
+html[data-style="cartoon"] .form-panel h2{font-family:var(--font-title);font-size:14px}
+html[data-style="cartoon"] .report-excerpt{line-height:1.9}
+
+/* 应用时长原来是裸挂在页面上的，贴纸风格里它得有个底 */
+html[data-style="cartoon"] .donut-wrap{
+  background:var(--panel);border:2px solid var(--line2);border-radius:18px;
+  box-shadow:4px 4px 0 var(--shadow-hard);padding:22px 24px;gap:30px;
+}
+html[data-style="cartoon"] .dlegend .dot{border-radius:3px;border:1.5px solid var(--line2)}
+
+/* 按钮要有厚度：按下时真的位移一格，这是贴纸的物理感 */
+html[data-style="cartoon"] .btn{
+  height:34px;border-radius:12px;border:2px solid var(--line2);
+  box-shadow:2px 2px 0 var(--shadow-hard);font-size:12.5px;padding:0 14px;
+}
+html[data-style="cartoon"] .btn:hover{
+  background:var(--panel2);color:var(--tx);transform:translate(1px,1px);
+  box-shadow:1px 1px 0 var(--shadow-hard);
+}
+html[data-style="cartoon"] .btn:active{transform:translate(2px,2px);box-shadow:none}
+html[data-style="cartoon"] .btn.primary{
+  background:var(--accent);color:var(--accent-ink);border-color:var(--line2);font-weight:500;
+}
+html[data-style="cartoon"] .btn.primary:hover{background:var(--accent);filter:brightness(1.05)}
+html[data-style="cartoon"] .btn.quiet{border-color:transparent;box-shadow:none}
+html[data-style="cartoon"] .btn.quiet:hover{transform:none;box-shadow:none}
+
+html[data-style="cartoon"] .seg{
+  border:2px solid var(--line2);border-radius:13px;background:var(--panel2);padding:3px;
+}
+html[data-style="cartoon"] .seg button{height:26px;border-radius:9px;font-size:12px}
+html[data-style="cartoon"] .seg button.on{
+  background:var(--accent);color:var(--accent-ink);box-shadow:none;font-weight:500;
+}
+html[data-style="cartoon"] .tag{font-size:11.5px}
+html[data-style="cartoon"] .tag::before{width:7px;height:7px;border:1.5px solid var(--line2)}
+
+/* ---------- 像素复古：形态与密度 ---------- */
+html[data-style="pixel"] body{
+  background:repeating-linear-gradient(0deg,rgba(255,255,255,.035) 0 1px,
+    transparent 1px 3px),var(--bg);
+}
+html[data-style="pixel"][data-theme="light"] body{
+  background:repeating-linear-gradient(0deg,rgba(26,22,48,.035) 0 1px,
+    transparent 1px 3px),var(--bg);
+}
+html[data-style="pixel"] .titlebar{height:44px;border-bottom:2px solid var(--line2)}
+html[data-style="pixel"] .brand{font-family:var(--font-title);letter-spacing:.08em}
+html[data-style="pixel"] .brand .mark{border:2px solid var(--line2)}
+
+html[data-style="pixel"] aside{width:216px;padding:16px 12px 12px;border-right:2px solid var(--line2)}
+html[data-style="pixel"] aside nav{gap:3px;margin-top:10px}
+html[data-style="pixel"] aside nav button{
+  height:38px;font-size:12.5px;padding:0 11px;border:2px solid transparent;letter-spacing:.02em;
+}
+html[data-style="pixel"] aside nav button:hover{background:var(--panel2);border-color:var(--line)}
+html[data-style="pixel"] aside nav button.on{
+  background:var(--accent);color:var(--accent-ink);border-color:var(--line2);font-weight:500;
+  box-shadow:inset 1px 1px 0 rgba(255,255,255,.45),inset -1px -1px 0 rgba(0,0,0,.28);
+}
+html[data-style="pixel"] aside nav button.on .ic{color:var(--accent-ink)}
+html[data-style="pixel"] .side-foot{border-top:2px solid var(--line2)}
+html[data-style="pixel"] .side-foot .dot{border-radius:0}
+
+html[data-style="pixel"] .wrap{padding:28px 34px 56px}
+html[data-style="pixel"] .page-head h1{
+  font-family:var(--font-title);font-size:23px;font-weight:400;letter-spacing:.04em;
+}
+html[data-style="pixel"] .page-head{margin-bottom:22px}
+
+html[data-style="pixel"] .metrics{gap:12px;border:none;margin-bottom:28px}
+html[data-style="pixel"] .metric{
+  background:var(--panel);border:2px solid var(--line2);padding:14px 16px 16px;
+  box-shadow:inset 0 0 0 1px var(--line);position:relative;
+}
+html[data-style="pixel"] .metric:first-child{padding-left:16px;border-left:2px solid var(--line2)}
+/* 左上角那颗 3px 亮点是像素风的「面板标记」，四张卡各一个 */
+html[data-style="pixel"] .metric::after{
+  content:"";position:absolute;left:6px;top:6px;width:3px;height:3px;background:var(--accent);
+}
+html[data-style="pixel"] .metric .k{font-size:11px;letter-spacing:.1em}
+html[data-style="pixel"] .metric .v{font-size:26px;margin-top:6px;letter-spacing:.02em}
+html[data-style="pixel"] .metric .u{font-family:var(--sans);font-size:12px;letter-spacing:0}
+
+html[data-style="pixel"] .block{margin-bottom:28px}
+html[data-style="pixel"] .block-head h2{font-family:var(--font-title);font-size:14px;letter-spacing:.08em}
+html[data-style="pixel"] .panel{
+  border:2px solid var(--line2);padding:20px 22px;box-shadow:inset 0 0 0 1px var(--line);
+}
+html[data-style="pixel"] .form-panel{
+  border:2px solid var(--line2);padding:4px 22px;box-shadow:inset 0 0 0 1px var(--line);
+}
+html[data-style="pixel"] .date-col,
+html[data-style="pixel"] .report-main,
+html[data-style="pixel"] .log-box,
+html[data-style="pixel"] .modal{
+  border:2px solid var(--line2);box-shadow:inset 0 0 0 1px var(--line);
+}
+html[data-style="pixel"] .form-panel h2{
+  font-family:var(--font-title);font-size:13px;letter-spacing:.08em;
+}
+html[data-style="pixel"] .form-row > label{letter-spacing:.04em}
+
+html[data-style="pixel"] .donut-wrap{
+  background:var(--panel);border:2px solid var(--line2);padding:20px 22px;gap:30px;
+  box-shadow:inset 0 0 0 1px var(--line);
+}
+html[data-style="pixel"] .dlegend .dot{border-radius:0}
+html[data-style="pixel"] .dlegend .val{letter-spacing:.02em}
+
+/* 按钮的倒角：左上提亮、右下压暗，模拟 2px 描边内的立体棱 */
+html[data-style="pixel"] .btn{
+  height:32px;border:2px solid var(--line2);padding:0 13px;font-size:12.5px;letter-spacing:.04em;
+  box-shadow:inset 1px 1px 0 rgba(255,255,255,.16),inset -1px -1px 0 rgba(0,0,0,.35);
+}
+html[data-style="pixel"] .btn:hover{background:var(--panel2);color:var(--tx)}
+html[data-style="pixel"] .btn.primary{
+  background:var(--accent);color:var(--accent-ink);border-color:var(--line2);font-weight:500;
+  box-shadow:inset 1px 1px 0 rgba(255,255,255,.6),inset -1px -1px 0 rgba(0,0,0,.22);
+}
+html[data-style="pixel"] .btn.primary:hover{background:var(--accent);filter:brightness(1.04)}
+html[data-style="pixel"] .btn.quiet{border-color:transparent;box-shadow:none}
+
+html[data-style="pixel"] .seg{border:2px solid var(--line2);background:var(--panel2);padding:2px}
+html[data-style="pixel"] .seg button{height:26px;font-size:12px;letter-spacing:.04em}
+html[data-style="pixel"] .seg button.on{
+  background:var(--accent);color:var(--accent-ink);box-shadow:inset 1px 1px 0 rgba(255,255,255,.5);
+}
+html[data-style="pixel"] .tag{font-size:11.5px;letter-spacing:.04em}
+html[data-style="pixel"] .tag::before{width:5px;height:5px;border-radius:0}
+
+/* 像素档的细部一律锐角。圆点与圆环除外——它们是「内容」，不是「控件」。 */
+html[data-style="pixel"] .md code,html[data-style="pixel"] .onboard code,
+html[data-style="pixel"] .bar-row .track,html[data-style="pixel"] .bar-row .fill,
+html[data-style="pixel"] .ack input,html[data-style="pixel"] .onboard .steps i,
+html[data-style="pixel"] #toast,html[data-style="pixel"] ::-webkit-scrollbar-thumb{border-radius:0}
+html[data-style="cartoon"] .md code,html[data-style="cartoon"] #toast{border-radius:9px}
+html[data-style="cartoon"] ::-webkit-scrollbar-thumb{border-radius:6px}

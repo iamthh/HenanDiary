@@ -158,3 +158,49 @@ def test_bad_theme_is_not_persisted() -> None:
         config.update_settings({"ui": {"theme": "solarized"}})
 
     assert config.load_settings()["ui"]["theme"] == "light"
+
+
+def test_default_style_is_graphite() -> None:
+    """默认风格是记录仪，老用户升级后界面不变。"""
+    assert config.ALLOWED_STYLES == ("graphite", "cartoon", "pixel")
+    assert config.load_settings()["ui"]["style"] == "graphite"
+
+
+def test_missing_style_key_is_filled_from_defaults() -> None:
+    """只有 theme、没有 style 的老配置，靠 deep_merge 补默认，不需要迁移脚本。"""
+    path = config.get_config_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({"ui": {"theme": "light"}}), encoding="utf-8")
+
+    settings = config.load_settings()
+
+    assert settings["ui"]["style"] == "graphite"
+    assert settings["ui"]["theme"] == "light"
+
+
+@pytest.mark.parametrize("style", ["graphite", "cartoon", "pixel"])
+def test_allowed_styles_are_accepted(style: str) -> None:
+    assert config.update_settings({"ui": {"style": style}})["ui"]["style"] == style
+
+
+def test_style_and_theme_do_not_overwrite_each_other() -> None:
+    """两个维度各自落盘：改风格不能把明暗带回默认值，反之亦然。"""
+    config.update_settings({"ui": {"style": "pixel", "theme": "light"}})
+    config.update_settings({"ui": {"style": "cartoon"}})
+
+    settings = config.load_settings()["ui"]
+    assert settings["style"] == "cartoon"
+    assert settings["theme"] == "light"
+
+
+def test_update_settings_rejects_unknown_style() -> None:
+    with pytest.raises(ValueError):
+        config.update_settings({"ui": {"style": "vaporwave"}})
+
+
+def test_bad_style_is_not_persisted() -> None:
+    config.update_settings({"ui": {"style": "pixel"}})
+    with pytest.raises(ValueError):
+        config.update_settings({"ui": {"style": "vaporwave"}})
+
+    assert config.load_settings()["ui"]["style"] == "pixel"

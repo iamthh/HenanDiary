@@ -24,6 +24,11 @@ DEFAULT_SCREENSHOT_INTERVAL_MIN = 5
 ALLOWED_THEMES = ("dark", "light")
 DEFAULT_THEME = "dark"
 
+# 需求文档 F8.2：界面风格（形态档），与明暗是两个独立维度，互不覆盖。
+# graphite = 记录仪（默认，默认档升级后界面不变）；cartoon = 卡通贴纸；pixel = 像素复古
+ALLOWED_STYLES = ("graphite", "cartoon", "pixel")
+DEFAULT_STYLE = "graphite"
+
 DEFAULT_SETTINGS: dict[str, Any] = {
     "ai": {
         "api_key_encrypted": "",
@@ -46,6 +51,7 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     },
     "ui": {
         "theme": DEFAULT_THEME,       # 界面皮肤（F8.1）：dark | light
+        "style": DEFAULT_STYLE,       # 界面风格（F8.2）：graphite | cartoon | pixel
     },
     "onboarding": {
         "done": False,
@@ -179,6 +185,10 @@ def _validate(settings: dict[str, Any]) -> None:
     theme = settings["ui"]["theme"]
     if theme not in ALLOWED_THEMES:
         raise ValueError(f"皮肤只允许 {'/'.join(ALLOWED_THEMES)}，收到: {theme!r}")
+
+    style = settings["ui"]["style"]
+    if style not in ALLOWED_STYLES:
+        raise ValueError(f"界面风格只允许 {'/'.join(ALLOWED_STYLES)}，收到: {style!r}")
 
 
 def _deep_merge(base: dict[str, Any], patch: dict[str, Any]) -> dict[str, Any]:
